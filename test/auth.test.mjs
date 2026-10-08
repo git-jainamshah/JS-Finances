@@ -11,9 +11,9 @@ test('authentication gate, password change, persistent owner, CSRF, and rate lim
  const dir=mkdtempSync(join(tmpdir(),'finance-auth-'));
  const port=14317,base=`http://localhost:${port}`,email='owner@example.test',password=randomBytes(20).toString('hex'),newPassword=randomBytes(20).toString('hex');
  const env={...process.env,PORT:String(port),APP_URL:base,OWNER_EMAIL:email,BETTER_AUTH_SECRET:randomBytes(40).toString('hex'),INITIAL_PASSWORD:password,FINANCE_DATA_DIR:dir,NODE_ENV:'test',DATABASE_URL:'',VERCEL:'',DATA_ENCRYPTION_KEY:''};
- let server,plaidServer;
+ let server,plaidServer,lastLinkBody;
  try{
-  plaidServer=createServer(async(req,res)=>{let raw='';for await(const chunk of req)raw+=chunk;const body=JSON.parse(raw||'{}');res.setHeader('Content-Type','application/json');if(req.url==='/institutions/get'&&body.client_id==='sandbox-client-id-private'&&body.secret==='sandbox-secret-private'){res.end(JSON.stringify({institutions:[],request_id:'test-request'}));}else{res.statusCode=400;res.end(JSON.stringify({error_code:'INVALID_API_KEYS',error_message:'The client ID or secret is invalid for this environment.',request_id:'test-error-request'}));}});
+  plaidServer=createServer(async(req,res)=>{let raw='';for await(const chunk of req)raw+=chunk;const body=JSON.parse(raw||'{}');res.setHeader('Content-Type','application/json');if(req.url==='/institutions/get'&&body.client_id==='sandbox-client-id-private'&&body.secret==='sandbox-secret-private'){res.end(JSON.stringify({institutions:[],request_id:'test-request'}));}else if(req.url==='/link/token/create'&&body.client_id==='sandbox-client-id-private'&&body.secret==='sandbox-secret-private'){lastLinkBody=body;res.end(JSON.stringify({link_token:'link-sandbox-test',request_id:'test-link-request'}));}else{res.statusCode=400;res.end(JSON.stringify({error_code:'INVALID_API_KEYS',error_message:'The client ID or secret is invalid for this environment.',request_id:'test-error-request'}));}});
   await new Promise((resolve,reject)=>{plaidServer.once('error',reject);plaidServer.listen(0,'127.0.0.1',resolve);});env.PLAID_TEST_BASE_URL=`http://127.0.0.1:${plaidServer.address().port}`;
   const setup=spawnSync(process.execPath,['scripts/setup.mjs'],{env,encoding:'utf8'});assert.equal(setup.status,0,setup.stderr);
   server=spawn(process.execPath,['server.mjs'],{env,stdio:['ignore','pipe','pipe']});
@@ -38,6 +38,7 @@ test('authentication gate, password change, persistent owner, CSRF, and rate lim
   const savedConfig=await post('/api/plaid-config',{environment:'sandbox',clientId,secret:plaidSecret},cookie,base,{'X-CSRF-Token':status.csrf});assert.equal(savedConfig.status,200,await savedConfig.clone().text());assert.equal((await savedConfig.json()).connected,true);
   const configText=await (await get('/api/plaid-config',cookie)).text();assert.doesNotMatch(configText,new RegExp(clientId));assert.doesNotMatch(configText,new RegExp(plaidSecret));
   const configuredStatus=await (await get('/api/status?env=sandbox',cookie)).json();assert.equal(configuredStatus.configured,true);assert.equal(configuredStatus.connected,true);
+  const linkToken=await post('/api/link-token',{environment:'sandbox'},cookie,base,{'X-CSRF-Token':status.csrf});assert.equal(linkToken.status,200,await linkToken.clone().text());assert.equal((await linkToken.json()).link_token,'link-sandbox-test');assert.equal(lastLinkBody.redirect_uri,undefined);
   const rejectedConfig=await post('/api/plaid-config',{environment:'production',clientId:'production-client-id',secret:'wrong-production-secret'},cookie,base,{'X-CSRF-Token':status.csrf});assert.equal(rejectedConfig.status,400);assert.match(await rejectedConfig.text(),/INVALID_API_KEYS/);
   const productionStatus=await (await get('/api/status?env=production',cookie)).json();assert.equal(productionStatus.configured,false);
   assert.equal((await get('/api/status?env=invalid',cookie)).status,400);

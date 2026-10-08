@@ -9,6 +9,7 @@ const plaidEnvironments=['sandbox','production'];
 const defaultEnv=process.env.PLAID_ENV || 'sandbox';
 if(!plaidEnvironments.includes(defaultEnv))throw Error('PLAID_ENV must be sandbox or production');
 const plaidBase=environment=>process.env.NODE_ENV==='test'&&process.env.PLAID_TEST_BASE_URL?process.env.PLAID_TEST_BASE_URL:`https://${environment}.plaid.com`;
+class PlaidRequestError extends Error{constructor(data){super(String(data?.error_message||'Plaid rejected the request.'));this.code=String(data?.error_code||'PLAID_REQUEST_FAILED');this.requestId=data?.request_id||null;}}
 function seal(token){const iv=crypto.getRandomValues(new Uint8Array(12)),c=createCipheriv('aes-256-gcm',getRuntime().key,iv);return Buffer.concat([iv,c.update(token),c.final(),c.getAuthTag()]).toString('base64');}
 function unseal(token){const b=Buffer.from(token,'base64'),c=createDecipheriv('aes-256-gcm',getRuntime().key,b.subarray(0,12));c.setAuthTag(b.subarray(-16));return Buffer.concat([c.update(b.subarray(12,-16)),c.final()]).toString();}
 function readEnvironment(value=defaultEnv){if(!plaidEnvironments.includes(value))throw Error('INVALID_PLAID_ENV');return value;}
@@ -35,7 +36,7 @@ async function validatePlaidCredentials(environment,clientId,secret){
 async function plaid(environment,path,body={}){
   const config=await plaidConfiguration(environment);if(!config)throw Error('PLAID_NOT_CONFIGURED');
   const r=await fetch(`${plaidBase(environment)}${path}`,{method:'POST',headers:{'Content-Type':'application/json','Plaid-Version':'2020-09-14'},body:JSON.stringify({client_id:config.clientId,secret:config.secret,...body}),signal:AbortSignal.timeout(45000)});
-  const data=await r.json();if(!r.ok)throw Error(data.error_code || 'PLAID_REQUEST_FAILED');return data;
+  const data=await r.json();if(!r.ok)throw new PlaidRequestError(data);return data;
 }
 const items=environment=>getRuntime().query('SELECT * FROM items WHERE env=?',[environment]);
 async function sync(item){
@@ -125,7 +126,7 @@ export default async function handler(req,res){
       const payload={user:{client_user_id:'local-personal-user'},client_name:'Jainam Finance',language:'en',country_codes:['CA']};
       if(body.itemId){const i=(await items(environment)).find(x=>x.id===body.itemId);if(!i)return send(404,{error:'Connection not found'});payload.access_token=unseal(i.token);}
       else {payload.products=['transactions'];payload.transactions={days_requested:730};}
-      if(process.env.PLAID_REDIRECT_URI)payload.redirect_uri=process.env.PLAID_REDIRECT_URI;
+      if(environment==='production'&&process.env.PLAID_REDIRECT_URI)payload.redirect_uri=process.env.PLAID_REDIRECT_URI;
       const r=await plaid(environment,'/link/token/create',payload);return send(200,{link_token:r.link_token});
     }
     if(url.pathname==='/api/exchange'){
@@ -143,5 +144,6 @@ export default async function handler(req,res){
       if(req.url.startsWith('/api/'))return send(503,{error:'SETUP_REQUIRED',message:'The owner must configure the required Vercel environment variables and redeploy. Financial data access is disabled.'});
       return send(503,'<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Setup required · Jainam Finance</title><body style="font:16px system-ui;max-width:620px;margin:12vh auto;padding:24px;color:#183c35;background:#f7f8f5"><h1>One more setup step.</h1><p>Your private dashboard is deployed, but its server configuration is incomplete. Financial data access is disabled.</p><p>In Vercel, open <strong>Project Settings → Environment Variables</strong>, add the required variables from the repository README, then redeploy.</p><p>Required: APP_URL, OWNER_EMAIL, BETTER_AUTH_SECRET, DATABASE_URL, DATA_ENCRYPTION_KEY. For the first owner setup, also set INITIAL_PASSWORD.</p><p>Do not enter passwords or API keys on this page.</p></body></html>','text/html');
     }
+    if(e instanceof PlaidRequestError)return send(400,{error:e.code,message:e.message,plaid:{code:e.code,requestId:e.requestId}});
     const known=/^[A-Z][A-Z_]+$/.test(e.message);send(400,{error:known?e.message:'Request failed. Check your configuration or try again.'});}
 }
