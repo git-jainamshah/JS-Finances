@@ -20,7 +20,7 @@ The configured local owner account has already been created in this workspace. I
 
 ## Deploy to Vercel
 
-1. Import this GitHub repository into Vercel. Framework preset: **Other**. Node.js: **24.x**. The included `vercel.json` defines the function, build command and routing.
+1. Import this GitHub repository into Vercel. Framework preset: **Other**. Node.js: **24.x**. The included `vercel.json` defines the function, `npm run build` command and routing. If you previously overrode the Build Command in Vercel, change it from `npm run setup` to `npm run build` or remove that override.
 2. Attach a **private PostgreSQL database**, for example Neon through the Vercel Marketplace. Use its pooled connection string and provider-required TLS settings in `DATABASE_URL`.
 3. Choose your production domain and set these **Production** environment variables before deploying:
 
@@ -39,13 +39,17 @@ The configured local owner account has already been created in this workspace. I
 
 Generate `BETTER_AUTH_SECRET` and `DATA_ENCRYPTION_KEY` independently with a password manager or `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"`. Enter secret values only in your local environment or Vercel's environment settings, never in source files, commit messages or chat.
 
-4. Deploy. `npm run setup` creates/migrates tables and seeds the owner only if no user exists. Repeat builds **never overwrite an existing password**. A mismatched owner causes setup to fail rather than creating another user.
+4. Deploy. `npm run build` validates the application without requiring credentials. If configuration is incomplete, it skips database setup and the deployed app returns a locked **503 Setup required** page. Set the variables listed above for the correct Vercel environment and redeploy. Once configuration is complete, the build runs `scripts/setup.mjs`, which creates/migrates tables and seeds the owner only if no user exists. Repeat builds **never overwrite an existing password**. A mismatched owner causes setup to fail rather than creating another user.
 5. Sign in and verify the dashboard. Remove `INITIAL_PASSWORD` from Vercel after the first successful setup; subsequent builds do not need it. Change the initial password using Account security.
 6. Link each institution through Plaid when ready. Verify authentication and connection behaviour on the actual deployed domain before relying on it.
 
-Production startup fails closed without an HTTPS APP_URL, authentication secret, owner email, encryption key and PostgreSQL. It never falls back to ephemeral SQLite on Vercel. All dashboard assets and data routes pass through the authenticated function; only the login screen, its stylesheet/script and a small allowlist of auth endpoints are public. Do not move `web/` into `public/`, which would bypass this protection.
+Production requests fail closed with HTTP 503 without an HTTPS APP_URL, authentication secret, owner email, encryption key and PostgreSQL. A successful code build alone does not mean the dashboard is configured or ready for financial data. It never falls back to ephemeral SQLite on Vercel. All dashboard assets and data routes pass through the authenticated function; only the login screen, its stylesheet/script and a small allowlist of auth endpoints are public. Do not move `web/` into `public/`, which would bypass this protection.
 
 Preview deployments need their **own database, secrets, owner and exact APP_URL**. Do not give arbitrary preview branches access to the production database. Domain changes also require updating APP_URL and Plaid's registered redirect URI. The repository prepares deployment, but does not provision your database or supply hosted credentials.
+
+### If your first deploy failed with “APP_URL is required”
+
+Pull the latest commit and redeploy with the build command `npm run build`. The earlier command ran database setup unconditionally. `.env not found` is normal on Vercel: local secrets are intentionally excluded. Set `APP_URL` to your exact production origin (for example `https://your-project.vercel.app`, without a trailing slash), configure the other variables in the table, and redeploy again to initialize the database. Do not upload `.env` or commit credentials. No secret or initial password is supplied by this repository.
 
 ## Authentication and storage
 

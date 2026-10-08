@@ -3,6 +3,7 @@ import {join} from 'node:path';
 import {createCipheriv,createDecipheriv,createHmac,timingSafeEqual} from 'node:crypto';
 import {fromNodeHeaders,toNodeHandler} from 'better-auth/node';
 import {getRuntime,root} from './lib/runtime.mjs';
+import {ConfigurationError} from './lib/config.mjs';
 import {normalize,demoData,applyChanges} from './finance.mjs';
 const env=process.env.PLAID_ENV || 'sandbox';
 if(!['sandbox','production'].includes(env))throw Error('PLAID_ENV must be sandbox or production');
@@ -94,5 +95,10 @@ export default async function handler(req,res){
       const results=[];for(const i of await items()){try{await sync(i);results.push({institution:i.institution,ok:true});}catch(e){results.push({institution:i.institution,ok:false,error:e.message});}}return send(200,{results});
     }
     return send(404,{error:'Not found'});
-  }catch(e){const known=/^[A-Z][A-Z_]+$/.test(e.message);send(400,{error:known?e.message:'Request failed. Check your configuration or try again.'});}
+  }catch(e){
+    if(e instanceof ConfigurationError){
+      if(req.url.startsWith('/api/'))return send(503,{error:'SETUP_REQUIRED',message:'The owner must configure the required Vercel environment variables and redeploy. Financial data access is disabled.'});
+      return send(503,'<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Setup required · Jainam Finance</title><body style="font:16px system-ui;max-width:620px;margin:12vh auto;padding:24px;color:#183c35;background:#f7f8f5"><h1>One more setup step.</h1><p>Your private dashboard is deployed, but its server configuration is incomplete. Financial data access is disabled.</p><p>In Vercel, open <strong>Project Settings → Environment Variables</strong>, add the required variables from the repository README, then redeploy.</p><p>Required: APP_URL, OWNER_EMAIL, BETTER_AUTH_SECRET, DATABASE_URL, DATA_ENCRYPTION_KEY. For the first owner setup, also set INITIAL_PASSWORD.</p><p>Do not enter passwords or API keys on this page.</p></body></html>','text/html');
+    }
+    const known=/^[A-Z][A-Z_]+$/.test(e.message);send(400,{error:known?e.message:'Request failed. Check your configuration or try again.'});}
 }
