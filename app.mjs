@@ -8,23 +8,33 @@ import {normalize,demoData,applyChanges} from './finance.mjs';
 const plaidEnvironments=['sandbox','production'];
 const defaultEnv=process.env.PLAID_ENV || 'sandbox';
 if(!plaidEnvironments.includes(defaultEnv))throw Error('PLAID_ENV must be sandbox or production');
+const plaidBase=environment=>process.env.NODE_ENV==='test'&&process.env.PLAID_TEST_BASE_URL?process.env.PLAID_TEST_BASE_URL:`https://${environment}.plaid.com`;
 function seal(token){const iv=crypto.getRandomValues(new Uint8Array(12)),c=createCipheriv('aes-256-gcm',getRuntime().key,iv);return Buffer.concat([iv,c.update(token),c.final(),c.getAuthTag()]).toString('base64');}
 function unseal(token){const b=Buffer.from(token,'base64'),c=createDecipheriv('aes-256-gcm',getRuntime().key,b.subarray(0,12));c.setAuthTag(b.subarray(-16));return Buffer.concat([c.update(b.subarray(12,-16)),c.final()]).toString();}
 function readEnvironment(value=defaultEnv){if(!plaidEnvironments.includes(value))throw Error('INVALID_PLAID_ENV');return value;}
 async function plaidConfiguration(environment){
-  const rows=await getRuntime().query('SELECT client_id,secret,updated_at FROM plaid_config WHERE env=?',[environment]);
-  if(rows[0])return {clientId:unseal(rows[0].client_id),secret:unseal(rows[0].secret),source:'dashboard',updatedAt:rows[0].updated_at};
-  if(environment===defaultEnv && process.env.PLAID_CLIENT_ID && process.env.PLAID_SECRET)return {clientId:process.env.PLAID_CLIENT_ID,secret:process.env.PLAID_SECRET,source:'vercel',updatedAt:null};
+  const rows=await getRuntime().query('SELECT client_id,secret,updated_at,verified_at FROM plaid_config WHERE env=?',[environment]);
+  if(rows[0])return {clientId:unseal(rows[0].client_id),secret:unseal(rows[0].secret),source:'dashboard',updatedAt:rows[0].updated_at,verifiedAt:rows[0].verified_at};
+  if(environment===defaultEnv && process.env.PLAID_CLIENT_ID && process.env.PLAID_SECRET)return {clientId:process.env.PLAID_CLIENT_ID,secret:process.env.PLAID_SECRET,source:'vercel',updatedAt:null,verifiedAt:null};
   return null;
 }
 async function configurationSummary(){
   const result={};
-  for(const environment of plaidEnvironments){const config=await plaidConfiguration(environment);result[environment]={configured:!!config,source:config?.source||null,updatedAt:config?.updatedAt||null};}
+  for(const environment of plaidEnvironments){const config=await plaidConfiguration(environment);result[environment]={configured:!!config,connected:!!config?.verifiedAt,source:config?.source||null,updatedAt:config?.updatedAt||null,verifiedAt:config?.verifiedAt||null};}
   return result;
+}
+async function validatePlaidCredentials(environment,clientId,secret){
+  let response,data;
+  try{
+    response=await fetch(`${plaidBase(environment)}/institutions/get`,{method:'POST',headers:{'Content-Type':'application/json','Plaid-Version':'2020-09-14'},body:JSON.stringify({client_id:clientId,secret,count:1,offset:0,country_codes:['CA']}),signal:AbortSignal.timeout(15000)});
+    data=await response.json();
+  }catch{return {ok:false,code:'PLAID_UNREACHABLE',message:`Could not reach Plaid ${environment}. Check the network and try again.`};}
+  if(!response.ok)return {ok:false,code:String(data?.error_code||'PLAID_CONNECTION_FAILED'),message:String(data?.error_message||'Plaid rejected these credentials.'),requestId:data?.request_id||null};
+  return {ok:true,requestId:data?.request_id||null};
 }
 async function plaid(environment,path,body={}){
   const config=await plaidConfiguration(environment);if(!config)throw Error('PLAID_NOT_CONFIGURED');
-  const r=await fetch(`https://${environment}.plaid.com${path}`,{method:'POST',headers:{'Content-Type':'application/json','Plaid-Version':'2020-09-14'},body:JSON.stringify({client_id:config.clientId,secret:config.secret,...body}),signal:AbortSignal.timeout(45000)});
+  const r=await fetch(`${plaidBase(environment)}${path}`,{method:'POST',headers:{'Content-Type':'application/json','Plaid-Version':'2020-09-14'},body:JSON.stringify({client_id:config.clientId,secret:config.secret,...body}),signal:AbortSignal.timeout(45000)});
   const data=await r.json();if(!r.ok)throw Error(data.error_code || 'PLAID_REQUEST_FAILED');return data;
 }
 const items=environment=>getRuntime().query('SELECT * FROM items WHERE env=?',[environment]);
@@ -79,7 +89,7 @@ export default async function handler(req,res){
     const csrf=session?createHmac('sha256',runtime.secret).update(session.session.token).digest('hex'):null;
     if(req.method==='GET'){
       const environment=readEnvironment(url.searchParams.get('env')||defaultEnv);
-      if(url.pathname==='/api/status'){const config=await plaidConfiguration(environment);return send(200,{configured:!!config,environment,csrf,connections:(await items(environment)).length,email:session.user.email});}
+      if(url.pathname==='/api/status'){const config=await plaidConfiguration(environment);return send(200,{configured:!!config,connected:!!config?.verifiedAt,environment,csrf,connections:(await items(environment)).length,email:session.user.email});}
       if(url.pathname==='/api/plaid-config')return send(200,{environments:await configurationSummary()});
       if(url.pathname==='/api/data')return send(200,url.searchParams.get('mode')==='live'?await liveData(environment):{...demoData(),environment});
       const file=staticFiles[url.pathname];if(file)return send(200,readFileSync(join(root,'web',file[0])),file[1]);
@@ -97,9 +107,19 @@ export default async function handler(req,res){
       const clientId=typeof body.clientId==='string'?body.clientId.trim():'';
       const secret=typeof body.secret==='string'?body.secret.trim():'';
       if(clientId.length<8 || clientId.length>512 || secret.length<8 || secret.length>512)return send(400,{error:'Enter a valid Plaid client ID and matching environment secret.'});
+      const validation=await validatePlaidCredentials(environment,clientId,secret);
+      if(!validation.ok)return send(400,{error:'PLAID_CONNECTION_FAILED',message:validation.message,plaid:{code:validation.code,requestId:validation.requestId||null}});
       const updatedAt=new Date().toISOString();
-      await getRuntime().query('INSERT INTO plaid_config(env,client_id,secret,updated_at) VALUES(?,?,?,?) ON CONFLICT(env) DO UPDATE SET client_id=excluded.client_id,secret=excluded.secret,updated_at=excluded.updated_at',[environment,seal(clientId),seal(secret),updatedAt]);
-      return send(200,{ok:true,environment,configured:true,source:'dashboard',updatedAt});
+      await getRuntime().query('INSERT INTO plaid_config(env,client_id,secret,updated_at,verified_at) VALUES(?,?,?,?,?) ON CONFLICT(env) DO UPDATE SET client_id=excluded.client_id,secret=excluded.secret,updated_at=excluded.updated_at,verified_at=excluded.verified_at',[environment,seal(clientId),seal(secret),updatedAt,updatedAt]);
+      return send(200,{ok:true,environment,configured:true,connected:true,source:'dashboard',updatedAt,verifiedAt:updatedAt});
+    }
+    if(url.pathname==='/api/plaid-config/verify'){
+      const config=await plaidConfiguration(environment);if(!config)return send(404,{error:'No saved Plaid configuration exists for this environment.'});
+      const validation=await validatePlaidCredentials(environment,config.clientId,config.secret);
+      if(!validation.ok)return send(400,{error:'PLAID_CONNECTION_FAILED',message:validation.message,plaid:{code:validation.code,requestId:validation.requestId||null}});
+      const verifiedAt=new Date().toISOString();
+      if(config.source==='dashboard')await getRuntime().query('UPDATE plaid_config SET verified_at=? WHERE env=?',[verifiedAt,environment]);
+      return send(200,{ok:true,environment,connected:true,verifiedAt});
     }
     if(url.pathname==='/api/link-token'){
       const payload={user:{client_user_id:'local-personal-user'},client_name:'Jainam Finance',language:'en',country_codes:['CA']};

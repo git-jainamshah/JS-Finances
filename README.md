@@ -66,7 +66,7 @@ The dashboard uses Google Fonts for typography and loads Plaid Link when connect
 
 ## Plaid setup
 
-Sign in and open **Plaid settings** to save Sandbox and Production credentials independently. The values are encrypted with `DATA_ENCRYPTION_KEY` before database storage, are never returned to the browser, and can be replaced without a Vercel redeploy. `PLAID_CLIENT_ID` and `PLAID_SECRET` remain supported as a fallback for the environment selected by `PLAID_ENV`.
+Sign in and open **Plaid settings** to save Sandbox and Production credentials independently. Before saving, the server tests the values against that environment's Plaid API. A successful configuration is encrypted with `DATA_ENCRYPTION_KEY`, locked in the interface, and can only be replaced through **Update configuration**. Saved values are never returned to the browser. Validation failures preserve the current configuration and show Plaid's error code, message, and request ID when available. `PLAID_CLIENT_ID` and `PLAID_SECRET` remain supported as a fallback for the environment selected by `PLAID_ENV`.
 
 Use the Sandbox and Production controls in the header to keep test Items and live Items separate. Plaid access tokens, accounts, transactions, connection status, linking and syncing are scoped to the selected environment. Sandbox Items cannot be promoted into Production; connect the live institutions again after Plaid grants Production access.
 

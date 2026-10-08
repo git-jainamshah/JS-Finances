@@ -5,7 +5,8 @@ const runtime=getRuntime();
 try {
  const {runMigrations}=await getMigrations(runtime.options);await runMigrations();
  await runtime.query(`CREATE TABLE IF NOT EXISTS items (id TEXT PRIMARY KEY, env TEXT NOT NULL, token TEXT NOT NULL, cursor TEXT, institution TEXT, synced TEXT, accounts TEXT DEFAULT '[]', transactions TEXT DEFAULT '[]')`);
- await runtime.query(`CREATE TABLE IF NOT EXISTS plaid_config (env TEXT PRIMARY KEY, client_id TEXT NOT NULL, secret TEXT NOT NULL, updated_at TEXT NOT NULL)`);
+ await runtime.query(`CREATE TABLE IF NOT EXISTS plaid_config (env TEXT PRIMARY KEY, client_id TEXT NOT NULL, secret TEXT NOT NULL, updated_at TEXT NOT NULL, verified_at TEXT)`);
+ try{await runtime.query('SELECT verified_at FROM plaid_config LIMIT 1');}catch{await runtime.query('ALTER TABLE plaid_config ADD COLUMN verified_at TEXT');}
  const users=await runtime.query('SELECT id,email FROM "user"');
  if(users.length){
   if(users.length!==1 || users[0].email.toLowerCase()!==runtime.owner)throw Error('Database owner does not match OWNER_EMAIL. Refusing to seed another user.');
