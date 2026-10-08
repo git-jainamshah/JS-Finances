@@ -1,0 +1,30 @@
+{
+  "servers": {
+    "personal-finance": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "${workspaceFolder}/agent.mjs"
+      ],
+      "env": {
+        "FINANCE_DATA_MODE": "live",
+        "FINANCE_PORT": "4317",
+        "FINANCE_EMAIL": "${input:finance-email}",
+        "FINANCE_PASSWORD": "${input:finance-password}"
+      }
+    }
+  },
+  "inputs": [
+    {
+      "id": "finance-email",
+      "type": "promptString",
+      "description": "Finance account email"
+    },
+    {
+      "id": "finance-password",
+      "type": "promptString",
+      "description": "Finance account password",
+      "password": true
+    }
+  ]
+}

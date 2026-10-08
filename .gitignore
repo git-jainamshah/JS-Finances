@@ -1,0 +1,12 @@
+.env
+.data/
+node_modules/
+.DS_Store
+.env.*
+!.env.example
+.vercel/
+coverage/
+*.log
+/dashboard-preview.jpg
+/login-preview.jpg
+/security-preview.jpg

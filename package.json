@@ -1,0 +1,22 @@
+{
+  "name": "jainam-finance",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Private personal finance dashboard with authentication and read-only Plaid data",
+  "type": "module",
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server.mjs",
+    "dev": "node --watch --env-file-if-exists=.env server.mjs",
+    "test": "node --test test/*.test.mjs",
+    "test:smoke": "node test/smoke.mjs",
+    "setup": "node --env-file-if-exists=.env scripts/setup.mjs",
+    "check": "node --check app.mjs && node --check web/app.js && node --check lib/runtime.mjs"
+  },
+  "dependencies": {
+    "better-auth": "^1.7.7",
+    "pg": "^8.23.1"
+  }
+}
