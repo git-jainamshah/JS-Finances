@@ -32,9 +32,9 @@ The configured local owner account has already been created in this workspace. I
 | `DATA_ENCRYPTION_KEY` | 32 random bytes encoded as base64; encrypts stored Plaid access tokens. Keep it stable and back it up securely. |
 | `DATABASE_URL` | Your PostgreSQL connection string. |
 | `INITIAL_PASSWORD` | Your chosen initial password (12–128 characters), supplied only for the first setup. |
-| `PLAID_ENV` | `sandbox` for test banks or `production` for live bank accounts. |
-| `PLAID_CLIENT_ID` | Plaid client ID; optional until you're ready to connect banks. |
-| `PLAID_SECRET` | Matching Plaid environment secret; optional initially. |
+| `PLAID_ENV` | Optional default view: `sandbox` or `production`. The dashboard can switch between both. |
+| `PLAID_CLIENT_ID` | Optional compatibility fallback. Prefer saving credentials in the authenticated Plaid settings screen. |
+| `PLAID_SECRET` | Optional compatibility fallback for the environment selected by `PLAID_ENV`. |
 | `PLAID_REDIRECT_URI` | If required by the institution, register this exact HTTPS URI in Plaid. Usually your app's root URL with trailing slash. |
 
 Generate `BETTER_AUTH_SECRET` and `DATA_ENCRYPTION_KEY` independently with a password manager or `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"`. Enter secret values only in your local environment or Vercel's environment settings, never in source files, commit messages or chat.
@@ -66,7 +66,9 @@ The dashboard uses Google Fonts for typography and loads Plaid Link when connect
 
 ## Plaid setup
 
-Set your Plaid credentials privately in `.env` locally or the Vercel environment for hosting. Restart or redeploy after changes. Live Trial connections use `PLAID_ENV=production` and the matching production secret.
+Sign in and open **Plaid settings** to save Sandbox and Production credentials independently. The values are encrypted with `DATA_ENCRYPTION_KEY` before database storage, are never returned to the browser, and can be replaced without a Vercel redeploy. `PLAID_CLIENT_ID` and `PLAID_SECRET` remain supported as a fallback for the environment selected by `PLAID_ENV`.
+
+Use the Sandbox and Production controls in the header to keep test Items and live Items separate. Plaid access tokens, accounts, transactions, connection status, linking and syncing are scoped to the selected environment. Sandbox Items cannot be promoted into Production; connect the live institutions again after Plaid grants Production access.
 
 Click **Connect account** and complete the consent/sign-in flow yourself for each institution. The app requests only Transactions and reads account metadata/cached balances through `/accounts/get`. It has no payment or transfer endpoints. It asks for up to 730 days of history, subject to institution availability. Amex Canada and exact account coverage require verification in live Link.
 

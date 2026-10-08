@@ -5,9 +5,11 @@ const exactMoney=(n,currency='CAD')=>n==null?'Unavailable':new Intl.NumberFormat
 const dateKey=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
 const now=new Date(), months=Array.from({length:6},(_,i)=>dateKey(new Date(now.getFullYear(),now.getMonth()-5+i,1)));
 const shortMonth=m=>new Date(`${m}-15T12:00:00`).toLocaleDateString('en-CA',{month:'short'});
-let data,status,mode='demo',period=months.at(-1),category='',limit=30;
+const savedEnvironment=localStorage.getItem('finance-plaid-environment');
+let data,status,plaidSettings,activeEnv=['sandbox','production'].includes(savedEnvironment)?savedEnvironment:'sandbox',mode='demo',period=months.at(-1),category='',limit=30;
 const notice=text=>{ $('notice').hidden=!text;$('notice').textContent=text; };
-async function api(path,body){const r=await fetch(path,body?{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':status.csrf},body:JSON.stringify(body)}:{});if(r.status===401){location.replace('/login');throw Error('Your session expired. Please sign in again.');}const d=await r.json();if(!r.ok)throw Error(d.error || d.message || 'Request failed');return d;}
+async function api(path,body){const includeEnvironment=!path.startsWith('/api/auth/'),payload=body&&includeEnvironment?{environment:activeEnv,...body}:body;const r=await fetch(path,payload?{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':status?.csrf||''},body:JSON.stringify(payload)}:{});if(r.status===401){location.replace('/login');throw Error('Your session expired. Please sign in again.');}const d=await r.json();if(!r.ok)throw Error(d.error || d.message || 'Request failed');return d;}
+const environmentPath=path=>`${path}${path.includes('?')?'&':'?'}env=${activeEnv}`;
 const bankRows=()=>data.transactions.filter(t=>!$('institution').value || t.institution===$('institution').value);
 const selectedRows=()=>bankRows().filter(t=>period==='six'?months.includes(t.date.slice(0,7)):t.date.startsWith(period));
 function metric(label,value,note,symbol){return `<div class="metric"><div class="metric-label">${label}<span>${symbol}</span></div><strong>${value}</strong><small>${note}</small></div>`;}
@@ -58,18 +60,31 @@ function renderConnections(){
  document.querySelectorAll('[data-reconnect]').forEach(b=>b.onclick=()=>connect(b.dataset.reconnect));
 }
 function setPeriod(p){period=p;limit=30;category='';render();}
-async function load(){data=await api(`/api/data?mode=${mode}`);const current=$('institution').value;const institutions=[...new Set(data.accounts.map(a=>a.institution))];$('institution').innerHTML='<option value="">All institutions</option>'+institutions.map(n=>`<option>${esc(n)}</option>`).join('');if(institutions.includes(current))$('institution').value=current;
- $('environment').textContent=mode==='demo'?'Sample data':status.environment==='sandbox'?'Plaid sandbox':'Connected data';$('mode-message').textContent=mode==='demo'?'◉  Exploring sample data. These are not your actual balances or transactions.':status.environment==='sandbox'?'◉  Sandbox environment: connected test accounts, not real financial data.':'◉  Connected account data. Metrics include posted CAD transactions only.';
+async function load(){data=await api(environmentPath(`/api/data?mode=${mode}`));const current=$('institution').value;const institutions=[...new Set(data.accounts.map(a=>a.institution))];$('institution').innerHTML='<option value="">All institutions</option>'+institutions.map(n=>`<option>${esc(n)}</option>`).join('');if(institutions.includes(current))$('institution').value=current;
+ $('mode-message').textContent=mode==='demo'?`◉  Exploring sample data in the ${activeEnv} view. These are not your actual balances or transactions.`:activeEnv==='sandbox'?'◉  Sandbox environment: connected test accounts, not real financial data.':'◉  Production account data. Metrics include posted CAD transactions only.';
  $('mode-toggle').textContent=mode==='demo'?'View connected accounts →':'Explore sample dashboard →';render();}
+function renderEnvironment(){
+ for(const id of ['env-sandbox','config-sandbox'])$(id).classList.toggle('selected',activeEnv==='sandbox');
+ for(const id of ['env-production','config-production'])$(id).classList.toggle('selected',activeEnv==='production');
+ const saved=plaidSettings?.environments?.[activeEnv];$('plaid-config-badge').textContent=saved?.configured?'Configured':'Not configured';
+ $('plaid-secret-label').textContent=`${activeEnv[0].toUpperCase()+activeEnv.slice(1)} secret`;
+ $('plaid-environment-help').textContent=activeEnv==='sandbox'?'Test with simulated institutions and transactions. Nothing here connects to a real bank.':'Use live institution credentials only after Plaid grants Production access.';
+ const form=$('plaid-config-form');form.clientId.placeholder=saved?.configured?'Saved securely — enter both values to replace':'Enter client ID';form.secret.placeholder=saved?.configured?'Saved securely — enter both values to replace':'Enter environment secret';
+}
+async function loadPlaidSettings(){plaidSettings=await api('/api/plaid-config');renderEnvironment();}
+async function setEnvironment(environment){
+ if(environment===activeEnv)return;activeEnv=environment;localStorage.setItem('finance-plaid-environment',activeEnv);category='';limit=30;period=months.at(-1);notice('');renderEnvironment();
+ try{status=await api(environmentPath('/api/status'));mode=status.connections?'live':'demo';await load();}catch(e){notice(e.message);}
+}
 let linkScript;
 function loadLink(){return linkScript ||= new Promise((resolve,reject)=>{const s=document.createElement('script');s.src='https://cdn.plaid.com/link/v2/stable/link-initialize.js';s.onload=resolve;s.onerror=()=>{linkScript=null;reject(Error('Could not load Plaid Link. Check your connection.'));};document.head.append(s);});}
 async function connect(itemId,oauthReturn=false){
- if(!status.configured){notice('To connect accounts, copy .env.example to .env, enter your Plaid credentials locally, and restart npm start. You can continue exploring the demo.');$('connections').scrollIntoView({behavior:'smooth'});return;}
+ if(!status.configured){notice(`Configure ${activeEnv} Plaid credentials in Plaid settings before connecting an account.`);$('plaid-settings').scrollIntoView({behavior:'smooth'});return;}
  const buttons=[$('connect-top'),$('connect-bottom')];buttons.forEach(b=>b.disabled=true);
  try{
   await loadLink();let token=oauthReturn?sessionStorage.getItem('plaid-link-token'):(await api('/api/link-token',itemId?{itemId}:{})).link_token;
   if(!token)throw Error('OAuth session expired. Start the connection again.');
-  if(!oauthReturn){sessionStorage.setItem('plaid-link-token',token);sessionStorage.setItem('plaid-update-item',itemId||'');}
+  if(!oauthReturn){sessionStorage.setItem('plaid-link-token',token);sessionStorage.setItem('plaid-update-item',itemId||'');sessionStorage.setItem('plaid-environment',activeEnv);}
   const reconnect=itemId||sessionStorage.getItem('plaid-update-item');
   const handler=window.Plaid.create({token,...(oauthReturn?{receivedRedirectUri:window.location.href}:{}),onSuccess:async(public_token,metadata)=>{
     try{if(!reconnect){const result=await api('/api/exchange',{public_token,institution:metadata.institution?.name});notice(result.warning || 'Account linked. If transactions are still loading, use Sync accounts shortly.');}else notice('Connection restored. Use Sync accounts to retrieve updated data.');
@@ -82,7 +97,13 @@ $('sync').onclick=async()=>{if(mode==='demo'){notice('Sample data does not need 
 $('mode-toggle').onclick=async()=>{mode=mode==='demo'?'live':'demo';category='';limit=30;try{await load();}catch(e){notice(e.message);}};
 $('period-month').onclick=()=>setPeriod(months.at(-1));$('period-last').onclick=()=>setPeriod(months.at(-2));$('period-six').onclick=()=>setPeriod('six');$('institution').onchange=()=>{category='';limit=30;render();};$('clear-category').onclick=()=>{category='';render();};$('search').oninput=()=>{limit=30;renderTransactions();};$('show-more').onclick=()=>{limit+=50;renderTransactions();};$('reduction').oninput=renderForecast;
 for(const a of document.querySelectorAll('nav a'))a.onclick=()=>{document.querySelector('nav .active')?.classList.remove('active');a.classList.add('active');};
-try{status=await api('/api/status');$('account-email').textContent=status.email;mode=status.connections?'live':'demo';await load();if(new URLSearchParams(location.search).has('oauth_state_id'))await connect(undefined,true);}catch(e){notice(`Could not load dashboard: ${e.message}`);}
+for(const environment of ['sandbox','production']){$(`env-${environment}`).onclick=()=>setEnvironment(environment);$(`config-${environment}`).onclick=()=>setEnvironment(environment);}
+try{if(new URLSearchParams(location.search).has('oauth_state_id'))activeEnv=sessionStorage.getItem('plaid-environment')||activeEnv;status=await api(environmentPath('/api/status'));$('account-email').textContent=status.email;mode=status.connections?'live':'demo';await loadPlaidSettings();await load();if(new URLSearchParams(location.search).has('oauth_state_id'))await connect(undefined,true);}catch(e){notice(`Could not load dashboard: ${e.message}`);}
+
+$('plaid-config-form').onsubmit=async e=>{
+ e.preventDefault();const form=e.currentTarget,button=form.querySelector('button[type="submit"]'),message=$('plaid-config-message');message.hidden=false;button.disabled=true;message.textContent=`Saving ${activeEnv} credentials securely…`;
+ try{await api('/api/plaid-config',{clientId:form.clientId.value,secret:form.secret.value});form.reset();await loadPlaidSettings();status=await api(environmentPath('/api/status'));message.textContent=`${activeEnv[0].toUpperCase()+activeEnv.slice(1)} is configured. You can connect an account now.`;}catch(e){message.textContent=e.message;}finally{button.disabled=false;}
+};
 
 $('sign-out').onclick=async()=>{try{await api('/api/auth/sign-out',{});location.replace('/login');}catch(e){notice(e.message);}};
 $('password-form').onsubmit=async e=>{

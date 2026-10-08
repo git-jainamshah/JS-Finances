@@ -29,7 +29,14 @@ test('authentication gate, password change, persistent owner, CSRF, and rate lim
   const second=await post('/api/auth/sign-in/email',{email,password});assert.equal(second.status,200);const otherCookie=cookies(second);
   assert.equal((await get('/',cookie)).status,200);assert.equal((await get('/api/data?mode=live',cookie)).status,200);
   for(const path of ['/.env','/.data/key','/server.mjs','/web/index.html'])assert.equal((await get(path,cookie)).status,404,path);
-  const status=await (await get('/api/status',cookie)).json();assert.ok(status.csrf);assert.equal(status.email,email);
+  const status=await (await get('/api/status?env=sandbox',cookie)).json();assert.ok(status.csrf);assert.equal(status.email,email);assert.equal(status.configured,false);
+  const emptyConfig=await (await get('/api/plaid-config',cookie)).json();assert.equal(emptyConfig.environments.sandbox.configured,false);assert.equal(emptyConfig.environments.production.configured,false);
+  const clientId='sandbox-client-id-private',plaidSecret='sandbox-secret-private';
+  const savedConfig=await post('/api/plaid-config',{environment:'sandbox',clientId,secret:plaidSecret},cookie,base,{'X-CSRF-Token':status.csrf});assert.equal(savedConfig.status,200,await savedConfig.clone().text());
+  const configText=await (await get('/api/plaid-config',cookie)).text();assert.doesNotMatch(configText,new RegExp(clientId));assert.doesNotMatch(configText,new RegExp(plaidSecret));
+  const configuredStatus=await (await get('/api/status?env=sandbox',cookie)).json();assert.equal(configuredStatus.configured,true);
+  const productionStatus=await (await get('/api/status?env=production',cookie)).json();assert.equal(productionStatus.configured,false);
+  assert.equal((await get('/api/status?env=invalid',cookie)).status,400);
   assert.equal((await post('/api/sync',{},cookie)).status,403);
   assert.equal((await post('/api/sync',{},cookie,base,{'X-CSRF-Token':status.csrf})).status,200);
   const badChange=await post('/api/auth/change-password',{currentPassword:'wrong-current',newPassword},cookie);assert.notEqual(badChange.status,200);
