@@ -4,7 +4,7 @@ import {createCipheriv,createDecipheriv,createHmac,timingSafeEqual} from 'node:c
 import {fromNodeHeaders,toNodeHandler} from 'better-auth/node';
 import {getRuntime,root} from './lib/runtime.mjs';
 import {ConfigurationError} from './lib/config.mjs';
-import {normalize,demoData,applyChanges} from './finance.mjs';
+import {accountClass,classifyTransactions,demoData,applyChanges} from './finance.mjs';
 const plaidEnvironments=['sandbox','production'];
 const defaultEnv=process.env.PLAID_ENV || 'sandbox';
 if(!plaidEnvironments.includes(defaultEnv))throw Error('PLAID_ENV must be sandbox or production');
@@ -55,7 +55,9 @@ async function sync(item){
   }
 }
 async function liveData(environment){
-  const rows=await items(environment);return {demo:false,environment,accounts:rows.flatMap(i=>JSON.parse(i.accounts).map(a=>({id:a.account_id,name:a.name,mask:a.mask,type:a.type,institution:i.institution,balance:a.balances.current,currency:a.balances.iso_currency_code || 'Unknown'}))),transactions:rows.flatMap(i=>JSON.parse(i.transactions).map(t=>normalize(t,i.institution))).sort((a,b)=>b.date.localeCompare(a.date)),connections:rows.map(i=>({id:i.id,institution:i.institution,synced:i.synced}))};
+  const rows=await items(environment),accounts=rows.flatMap(i=>JSON.parse(i.accounts).map(a=>({id:a.account_id,name:a.name,officialName:a.official_name||'',mask:a.mask,type:a.type,subtype:a.subtype||'',class:accountClass(a),institution:i.institution,balance:a.balances.current,available:a.balances.available,limit:a.balances.limit,currency:a.balances.iso_currency_code||a.balances.unofficial_currency_code||'Unknown'})));
+  const transactions=rows.flatMap(i=>{const itemAccounts=JSON.parse(i.accounts);return classifyTransactions(JSON.parse(i.transactions),itemAccounts,i.institution);}).sort((a,b)=>b.date.localeCompare(a.date));
+  return {demo:false,environment,accounts,transactions,coverage:{start:transactions.at(-1)?.date||null,end:transactions[0]?.date||null},connections:rows.map(i=>({id:i.id,institution:i.institution,synced:i.synced}))};
 }
 const staticFiles={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/style.css':['style.css','text/css'],'/finance.mjs':['../finance.mjs','text/javascript'],'/login':['login.html','text/html'],'/login.js':['login.js','text/javascript'],'/auth.css':['auth.css','text/css']};
 const authPaths=new Set(['/api/auth/sign-in/email','/api/auth/sign-out','/api/auth/get-session','/api/auth/change-password','/api/auth/ok']);

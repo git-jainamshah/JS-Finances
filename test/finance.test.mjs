@@ -1,12 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {normalize,summarize,applyChanges,demoData} from '../finance.mjs';
-const t=(id,amount,primary,detailed='',extra={})=>normalize({transaction_id:id,amount,personal_finance_category:{primary,detailed,confidence_level:'HIGH'},iso_currency_code:'CAD',...extra});
+import {normalize,classifyTransactions,summarize,applyChanges,demoData} from '../finance.mjs';
+const t=(id,amount,primary,detailed='',extra={},account={})=>normalize({transaction_id:id,account_id:account.account_id,amount,date:extra.date||'2026-09-15',personal_finance_category:{primary,detailed,confidence_level:'HIGH'},iso_currency_code:'CAD',...extra},'',account);
 test('income, refunds, transfers, card payments, pending and foreign currencies',()=>{
  const rows=[t('salary',-5000,'INCOME'),t('purchase',1000,'GENERAL_MERCHANDISE'),t('refund',-100,'GENERAL_MERCHANDISE'),t('transfer',-500,'TRANSFER_IN'),t('cardpay',900,'LOAN_PAYMENTS','LOAN_PAYMENTS_CREDIT_CARD_PAYMENT'),t('pending',400,'FOOD_AND_DRINK','',{pending:true}),t('usd',800,'TRAVEL','',{iso_currency_code:'USD'})];
- assert.deepEqual(summarize(rows),{income:5000,spending:900,surplus:4100,savingsRate:82});
+ assert.deepEqual(summarize(rows),{income:5000,spending:900,payments:0,refunds:100,surplus:4100,savingsRate:82});
 });
 test('negative unclassified transactions are refunds, not invented income',()=>{assert.equal(t('x',-30,'UNCATEGORIZED').kind,'refund');assert.equal(summarize([]).savingsRate,null);});
+test('credit-card payments are transfers, never income',()=>{
+ const card={account_id:'amex',type:'credit',subtype:'credit card',name:'Cobalt'};
+ const payment=t('payment',-2546.62,'INCOME','',{name:'PAYMENT RECEIVED - THANK YOU'},card);
+ assert.equal(payment.kind,'credit_payment');assert.equal(payment.category,'Credit card payments');
+ assert.deepEqual(summarize([payment]),{income:0,spending:0,payments:2546.62,refunds:0,surplus:0,savingsRate:null});
+});
+test('matching card payments and merchant refunds use account context',()=>{
+ const accounts=[{account_id:'cash',type:'depository',subtype:'checking',name:'Chequing'},{account_id:'card',type:'credit',subtype:'credit card',name:'Card'}];
+ const raw=[
+  {transaction_id:'cash-pay',account_id:'cash',date:'2026-09-14',name:'AMEX PAYMENT',amount:500,iso_currency_code:'CAD',personal_finance_category:{primary:'LOAN_PAYMENTS',detailed:'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT',confidence_level:'HIGH'}},
+  {transaction_id:'card-pay',account_id:'card',date:'2026-09-15',name:'PAYMENT RECEIVED - THANK YOU',amount:-500,iso_currency_code:'CAD',personal_finance_category:{primary:'INCOME',detailed:'INCOME_OTHER_INCOME',confidence_level:'LOW'}},
+  {transaction_id:'purchase',account_id:'card',date:'2026-08-20',name:'INDIGO',amount:62,iso_currency_code:'CAD',personal_finance_category:{primary:'GENERAL_MERCHANDISE',detailed:'GENERAL_MERCHANDISE_BOOKSTORES_AND_NEWSSTANDS',confidence_level:'HIGH'}},
+  {transaction_id:'refund',account_id:'card',date:'2026-09-01',name:'INDIGO REFUND',amount:-62,iso_currency_code:'CAD',personal_finance_category:{primary:'GENERAL_MERCHANDISE',detailed:'GENERAL_MERCHANDISE_BOOKSTORES_AND_NEWSSTANDS',confidence_level:'LOW'}}
+ ];
+ const rows=classifyTransactions(raw,accounts,'Bank');assert.equal(rows.find(x=>x.id==='cash-pay').kind,'transfer');assert.equal(rows.find(x=>x.id==='card-pay').kind,'credit_payment');assert.equal(rows.find(x=>x.id==='refund').kind,'refund');assert.equal(rows.find(x=>x.id==='refund').review,false);assert.equal(summarize(rows).spending,0);
+});
 test('sync pages update, delete, deduplicate, and replace pending records',()=>{
  const existing=[{transaction_id:'pending',amount:20},{transaction_id:'modified',amount:10}];
  const pages=[{added:[{transaction_id:'posted',amount:22}],modified:[{transaction_id:'modified',amount:12}],removed:[{transaction_id:'pending'}]}];
