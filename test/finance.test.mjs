@@ -4,7 +4,7 @@ import {accountClass,normalize,classifyTransactions,summarize,applyChanges,demoD
 const t=(id,amount,primary,detailed='',extra={},account={})=>normalize({transaction_id:id,account_id:account.account_id,amount,date:extra.date||'2026-09-15',personal_finance_category:{primary,detailed,confidence_level:'HIGH'},iso_currency_code:'CAD',...extra},'',account);
 test('income, refunds, transfers, card payments, pending and foreign currencies',()=>{
  const rows=[t('salary',-5000,'INCOME'),t('purchase',1000,'GENERAL_MERCHANDISE'),t('refund',-100,'GENERAL_MERCHANDISE'),t('transfer',-500,'TRANSFER_IN'),t('cardpay',900,'LOAN_PAYMENTS','LOAN_PAYMENTS_CREDIT_CARD_PAYMENT'),t('pending',400,'FOOD_AND_DRINK','',{pending:true}),t('usd',800,'TRAVEL','',{iso_currency_code:'USD'})];
- assert.deepEqual(summarize(rows),{income:5000,spending:900,payments:0,refunds:100,surplus:4100,savingsRate:82});
+ assert.deepEqual(summarize(rows),{income:5000,spending:900,payments:900,refunds:100,surplus:4100,savingsRate:82});
 });
 test('negative unclassified transactions are refunds, not invented income',()=>{assert.equal(t('x',-30,'UNCATEGORIZED').kind,'refund');assert.equal(summarize([]).savingsRate,null);});
 test('credit-card payments are transfers, never income',()=>{
@@ -14,7 +14,12 @@ test('credit-card payments are transfers, never income',()=>{
  assert.equal(payment.review,false);
  assert.deepEqual(summarize([payment]),{income:0,spending:0,payments:2546.62,refunds:0,surplus:0,savingsRate:null});
 });
-test('credit accounts with a line-of-credit subtype are identified correctly',()=>{assert.equal(accountClass({type:'credit',subtype:'line of credit'}),'credit_line');});
+test('credit lines are identified from subtype or account name',()=>{assert.equal(accountClass({type:'credit',subtype:'line of credit'}),'credit_line');assert.equal(accountClass({type:'credit',subtype:'credit card',name:'ScotiaLine Line of Credit'}),'credit_line');});
+test('obvious cash-side credit-card bill payments are excluded from spending',()=>{
+ const cash={account_id:'cash',type:'depository',subtype:'checking',name:'Preferred Package'};
+ const payment=t('ctfs',35.26,'LOAN_PAYMENTS','LOAN_PAYMENTS_OTHER_PAYMENT',{name:'Bill Payment CANADIAN TIRE BANK'},cash);
+ assert.equal(payment.kind,'credit_payment');assert.equal(payment.review,false);assert.equal(summarize([payment]).spending,0);
+});
 test('matching card payments and merchant refunds use account context',()=>{
  const accounts=[{account_id:'cash',type:'depository',subtype:'checking',name:'Chequing'},{account_id:'card',type:'credit',subtype:'credit card',name:'Card'}];
  const raw=[

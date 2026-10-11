@@ -1,10 +1,11 @@
 const paymentWords=/\b(PAYMENT RECEIVED|THANK YOU|AUTOPAY|CARD PAYMENT|CREDIT CARD PAYMENT|PAYMENT -? THANK|PAYMENT THANK)\b/i;
+const outgoingCardPaymentWords=/\b(?:BILL PAYMENT.*(?:BANK|VISA|MASTERCARD|MASTER CARD|AMEX|AMERICAN EXPRESS|CAPITAL ONE)|(?:VISA|MASTERCARD|MASTER CARD|AMEX|AMERICAN EXPRESS) PAYMENT)\b/i;
 const refundWords=/\b(REFUND|RETURN|REVERSAL|CREDIT MEMO|MERCHANT CREDIT|PRICE ADJUSTMENT|CASHBACK)\b/i;
 const labels={FOOD_AND_DRINK:'Food & dining',GENERAL_MERCHANDISE:'Shopping',RENT_AND_UTILITIES:'Home & bills',TRANSPORTATION:'Transport',ENTERTAINMENT:'Entertainment',GENERAL_SERVICES:'Services',TRAVEL:'Travel',MEDICAL:'Health',PERSONAL_CARE:'Personal care',BANK_FEES:'Bank fees',LOAN_PAYMENTS:'Loan payments',INCOME:'Income',GOVERNMENT_AND_NON_PROFIT:'Government & giving',HOME_IMPROVEMENT:'Home improvement',UNCATEGORIZED:'Needs review'};
 
 export function accountClass(account={}){
-  const type=String(account.type||'').toLowerCase(),subtype=String(account.subtype||'').toLowerCase();
-  if(/line of credit|home equity|overdraft/.test(subtype))return 'credit_line';
+  const type=String(account.type||'').toLowerCase(),subtype=String(account.subtype||'').toLowerCase(),description=[subtype,account.name,account.official_name,account.officialName].filter(Boolean).join(' ').toLowerCase();
+  if(/line of credit|scotialine|home equity|overdraft/.test(description))return 'credit_line';
   if(type==='credit'||/credit card|paypal/.test(subtype))return 'credit_card';
   if(type==='loan')return 'loan';
   if(type==='investment')return 'investment';
@@ -14,8 +15,8 @@ export function accountClass(account={}){
 export function normalize(t,institution='',account={}){
   const p=t.personal_finance_category||{},primary=p.primary||'UNCATEGORIZED',detail=p.detailed||'';
   const classification=accountClass(account),credit=['credit_card','credit_line'].includes(classification),name=t.merchant_name||t.name||'Unknown merchant';
-  const plaidTransfer=primary.startsWith('TRANSFER')||/CREDIT_CARD_PAYMENT/.test(detail);
-  const cardPayment=credit&&t.amount<0&&(paymentWords.test(name)||plaidTransfer||/LOAN_PAYMENTS_CREDIT_CARD_PAYMENT/.test(detail));
+  const explicitCardPayment=/CREDIT_CARD_PAYMENT/.test(detail),plaidTransfer=primary.startsWith('TRANSFER')||explicitCardPayment;
+  const cardPayment=credit&&t.amount<0&&(paymentWords.test(name)||plaidTransfer)||!credit&&t.amount>0&&(explicitCardPayment||outgoingCardPaymentWords.test(name));
   const income=primary==='INCOME'&&!credit;
   const kind=cardPayment?'credit_payment':plaidTransfer?'transfer':income?'income':t.amount<0?'refund':'expense';
   const baseCategory=detail.includes('GROCERIES')?'Groceries':labels[primary]||primary.replaceAll('_',' ').toLowerCase();
@@ -34,8 +35,8 @@ export function classifyTransactions(rawTransactions,accounts=[],institution='')
     const counterpart=rows.filter(t=>t.accountId!==payment.accountId&&t.currency===payment.currency&&t.amount>0&&Math.abs(t.amount+payment.amount)<.01&&dayDistance(t.date,payment.date)<=10).sort((a,b)=>dayDistance(a.date,payment.date)-dayDistance(b.date,payment.date))[0];
     if(counterpart){payment.pairedTransactionId=counterpart.id;counterpart.pairedTransactionId=payment.id;counterpart.kind='transfer';counterpart.category='Credit card payments';counterpart.review=false;counterpart.classificationReason='matched credit-card payment';}
   }
-  const purchases=rows.filter(t=>t.kind==='expense'&&t.accountClass==='credit_card');
-  for(const row of rows.filter(t=>t.kind==='refund'&&t.accountClass==='credit_card')){
+  const purchases=rows.filter(t=>t.kind==='expense'&&['credit_card','credit_line'].includes(t.accountClass));
+  for(const row of rows.filter(t=>t.kind==='refund'&&['credit_card','credit_line'].includes(t.accountClass))){
     const key=merchantKey(row.name),match=purchases.find(p=>p.accountId===row.accountId&&p.currency===row.currency&&p.amount>0&&Math.abs(p.amount+row.amount)<.01&&dayDistance(p.date,row.date)<=180&&key&&merchantKey(p.name)===key);
     if(match){row.category='Refunds';row.review=false;row.matchedPurchaseId=match.id;row.classificationReason='matched merchant purchase';}
   }
