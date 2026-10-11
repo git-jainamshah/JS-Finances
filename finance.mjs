@@ -52,6 +52,12 @@ export function summarize(transactions){
   return {income,spending,payments,refunds,surplus:Math.round((income-spending)*100)/100,savingsRate:income>0?(income-spending)/income*100:null};
 }
 
+export function exponentiallyWeightedAverage(values,weight=.35){
+  const clean=values.map(Number).filter(Number.isFinite);
+  if(!clean.length)return 0;
+  return clean.slice(1).reduce((average,value)=>weight*value+(1-weight)*average,clean[0]);
+}
+
 export function applyChanges(existing,pages){
   const result=new Map(existing.map(t=>[t.transaction_id,t]));
   for(const page of pages){for(const t of [...page.added,...page.modified])result.set(t.transaction_id,t);for(const t of page.removed)result.delete(t.transaction_id);}
