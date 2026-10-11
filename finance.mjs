@@ -2,7 +2,10 @@ const paymentWords=/\b(PAYMENT RECEIVED|THANK YOU|AUTOPAY|CARD PAYMENT|CREDIT CA
 const outgoingCardPaymentWords=/\b(?:BILL PAYMENT.*(?:BANK|VISA|MASTERCARD|MASTER CARD|AMEX|AMERICAN EXPRESS|CAPITAL ONE)|(?:VISA|MASTERCARD|MASTER CARD|AMEX|AMERICAN EXPRESS) PAYMENT)\b/i;
 const refundWords=/\b(REFUND|RETURN|REVERSAL|CREDIT MEMO|MERCHANT CREDIT|PRICE ADJUSTMENT|CASHBACK)\b/i;
 const interacDeposit=/\bDEPOSIT.*INTERAC E-?TRANSFER\b/i;
+const rentWords=/\b(?:SIGNET(?: GROUP| MANAGEMENT)?|RENT PAYMENT|MONTHLY RENT)\b/i;
 const labels={FOOD_AND_DRINK:'Food & dining',GENERAL_MERCHANDISE:'Shopping',RENT_AND_UTILITIES:'Home & bills',TRANSPORTATION:'Transport',ENTERTAINMENT:'Entertainment',GENERAL_SERVICES:'Services',TRAVEL:'Travel',MEDICAL:'Health',PERSONAL_CARE:'Personal care',BANK_FEES:'Bank fees',LOAN_PAYMENTS:'Loan payments',INCOME:'Income',GOVERNMENT_AND_NON_PROFIT:'Government & giving',HOME_IMPROVEMENT:'Home improvement',UNCATEGORIZED:'Needs review'};
+
+export const isRentPayment=transaction=>transaction?.kind==='expense'&&(transaction?.category==='Rent'||rentWords.test(transaction?.name||''));
 
 export function accountClass(account={}){
   const type=String(account.type||'').toLowerCase(),subtype=String(account.subtype||'').toLowerCase(),description=[subtype,account.name,account.official_name,account.officialName].filter(Boolean).join(' ').toLowerCase();
@@ -20,10 +23,10 @@ export function normalize(t,institution='',account={}){
   const cardPayment=credit&&t.amount<0&&(paymentWords.test(name)||plaidTransfer)||!credit&&t.amount>0&&(explicitCardPayment||outgoingCardPaymentWords.test(name));
   const income=primary==='INCOME'&&!credit;
   const kind=cardPayment?'credit_payment':plaidTransfer?'transfer':income?'income':t.amount<0?'refund':'expense';
-  const baseCategory=detail.includes('GROCERIES')?'Groceries':labels[primary]||primary.replaceAll('_',' ').toLowerCase();
+  const rent=kind==='expense'&&rentWords.test(name),baseCategory=rent?'Rent':detail.includes('GROCERIES')?'Groceries':labels[primary]||primary.replaceAll('_',' ').toLowerCase();
   const category=cardPayment?'Credit card payments':plaidTransfer?'Transfers':kind==='refund'&&refundWords.test(name)?'Refunds':baseCategory;
   const confidence=p.confidence_level||null,ambiguousCredit=credit&&t.amount<0&&!cardPayment&&!refundWords.test(name);
-  return {id:t.transaction_id,accountId:t.account_id,date:t.date,name,amount:t.amount,currency:t.iso_currency_code||t.unofficial_currency_code||'Unknown',pending:!!t.pending,category,kind,institution,accountName:account.name||'',accountType:account.type||'',accountSubtype:account.subtype||'',accountClass:classification,review:cardPayment?false:ambiguousCredit||!p.primary||!['HIGH','VERY_HIGH'].includes(confidence),classificationReason:cardPayment?'credit-account payment description':plaidTransfer?'Plaid transfer category':income?'Plaid income category':kind==='refund'?(refundWords.test(name)?'refund description':'credit or negative transaction'):'Plaid spending category'};
+  return {id:t.transaction_id,accountId:t.account_id,date:t.date,name,amount:t.amount,currency:t.iso_currency_code||t.unofficial_currency_code||'Unknown',pending:!!t.pending,category,kind,institution,accountName:account.name||'',accountType:account.type||'',accountSubtype:account.subtype||'',accountClass:classification,review:rent||cardPayment?false:ambiguousCredit||!p.primary||!['HIGH','VERY_HIGH'].includes(confidence),classificationReason:rent?'known rent merchant':cardPayment?'credit-account payment description':plaidTransfer?'Plaid transfer category':income?'Plaid income category':kind==='refund'?(refundWords.test(name)?'refund description':'credit or negative transaction'):'Plaid spending category'};
 }
 
 const dayDistance=(a,b)=>Math.abs((new Date(`${a}T12:00:00`)-new Date(`${b}T12:00:00`))/86400000);

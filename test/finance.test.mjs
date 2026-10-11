@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {accountClass,exponentiallyWeightedAverage,robustWeightedAverage,normalize,classifyTransactions,summarize,applyChanges,demoData} from '../finance.mjs';
+import {accountClass,exponentiallyWeightedAverage,robustWeightedAverage,normalize,classifyTransactions,summarize,applyChanges,demoData,isRentPayment} from '../finance.mjs';
 const t=(id,amount,primary,detailed='',extra={},account={})=>normalize({transaction_id:id,account_id:account.account_id,amount,date:extra.date||'2026-09-15',personal_finance_category:{primary,detailed,confidence_level:'HIGH'},iso_currency_code:'CAD',...extra},'',account);
 test('income, refunds, transfers, card payments, pending and foreign currencies',()=>{
  const rows=[t('salary',-5000,'INCOME'),t('purchase',1000,'GENERAL_MERCHANDISE'),t('refund',-100,'GENERAL_MERCHANDISE'),t('transfer',-500,'TRANSFER_IN'),t('cardpay',900,'LOAN_PAYMENTS','LOAN_PAYMENTS_CREDIT_CARD_PAYMENT'),t('pending',400,'FOOD_AND_DRINK','',{pending:true}),t('usd',800,'TRAVEL','',{iso_currency_code:'USD'})];
@@ -21,6 +21,11 @@ test('obvious cash-side credit-card bill payments are excluded from spending',()
  const cash={account_id:'cash',type:'depository',subtype:'checking',name:'Preferred Package'};
  const payment=t('ctfs',35.26,'LOAN_PAYMENTS','LOAN_PAYMENTS_OTHER_PAYMENT',{name:'Bill Payment CANADIAN TIRE BANK'},cash);
  assert.equal(payment.kind,'credit_payment');assert.equal(payment.review,false);assert.equal(summarize([payment]).spending,0);
+});
+test('Signet transactions are recognized as rent',()=>{
+ const cash={account_id:'cash',type:'depository',subtype:'checking',name:'Preferred Package'};
+ const rent=t('rent',2470.04,'RENT_AND_UTILITIES','RENT_AND_UTILITIES_RENT',{name:'Signet Management'},cash);
+ assert.equal(rent.kind,'expense');assert.equal(rent.category,'Rent');assert.equal(rent.review,false);assert.equal(rent.classificationReason,'known rent merchant');assert.equal(isRentPayment(rent),true);
 });
 test('matching card payments and merchant refunds use account context',()=>{
  const accounts=[{account_id:'cash',type:'depository',subtype:'checking',name:'Chequing'},{account_id:'card',type:'credit',subtype:'credit card',name:'Card'}];
