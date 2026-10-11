@@ -1,6 +1,7 @@
 const paymentWords=/\b(PAYMENT RECEIVED|THANK YOU|AUTOPAY|CARD PAYMENT|CREDIT CARD PAYMENT|PAYMENT -? THANK|PAYMENT THANK)\b/i;
 const outgoingCardPaymentWords=/\b(?:BILL PAYMENT.*(?:BANK|VISA|MASTERCARD|MASTER CARD|AMEX|AMERICAN EXPRESS|CAPITAL ONE)|(?:VISA|MASTERCARD|MASTER CARD|AMEX|AMERICAN EXPRESS) PAYMENT)\b/i;
 const refundWords=/\b(REFUND|RETURN|REVERSAL|CREDIT MEMO|MERCHANT CREDIT|PRICE ADJUSTMENT|CASHBACK)\b/i;
+const interacDeposit=/\bDEPOSIT.*INTERAC E-?TRANSFER\b/i;
 const labels={FOOD_AND_DRINK:'Food & dining',GENERAL_MERCHANDISE:'Shopping',RENT_AND_UTILITIES:'Home & bills',TRANSPORTATION:'Transport',ENTERTAINMENT:'Entertainment',GENERAL_SERVICES:'Services',TRAVEL:'Travel',MEDICAL:'Health',PERSONAL_CARE:'Personal care',BANK_FEES:'Bank fees',LOAN_PAYMENTS:'Loan payments',INCOME:'Income',GOVERNMENT_AND_NON_PROFIT:'Government & giving',HOME_IMPROVEMENT:'Home improvement',UNCATEGORIZED:'Needs review'};
 
 export function accountClass(account={}){
@@ -40,22 +41,51 @@ export function classifyTransactions(rawTransactions,accounts=[],institution='')
     const key=merchantKey(row.name),match=purchases.find(p=>p.accountId===row.accountId&&p.currency===row.currency&&p.amount>0&&Math.abs(p.amount+row.amount)<.01&&dayDistance(p.date,row.date)<=180&&key&&merchantKey(p.name)===key);
     if(match){row.category='Refunds';row.review=false;row.matchedPurchaseId=match.id;row.classificationReason='matched merchant purchase';}
   }
+  const contributionCandidates=rows.filter(t=>t.kind==='transfer'&&t.amount<0&&t.currency==='CAD'&&/preferred package/i.test(t.accountName)&&interacDeposit.test(t.name)&&Math.abs(t.amount)>=500&&Math.abs(t.amount)<=700&&Number(t.date.slice(8,10))<=12);
+  const contributionMonths=new Map();
+  for(const row of contributionCandidates){const month=row.date.slice(0,7),group=contributionMonths.get(month)||[];group.push(row);contributionMonths.set(month,group);}
+  if(contributionMonths.size>=4)for(const group of contributionMonths.values()){
+    const row=group.sort((a,b)=>a.date.localeCompare(b.date)||Math.abs(Math.abs(a.amount)-600)-Math.abs(Math.abs(b.amount)-600))[0];
+    row.kind='contribution';row.category='Household contribution';row.review=false;row.classificationReason='recurring monthly household contribution';
+  }
+  const genericReimbursements=rows.filter(t=>t.kind==='transfer'&&t.amount<0&&t.currency==='CAD'&&interacDeposit.test(t.name));
+  const largeExpenses=rows.filter(t=>t.kind==='expense'&&!t.pending&&t.currency==='CAD'&&t.amount>=2000).sort((a,b)=>a.date.localeCompare(b.date));
+  for(const expense of largeExpenses){
+    const maximum=expense.amount*1.025,candidates=genericReimbursements.filter(t=>!t.reimbursedExpenseId&&t.date>=expense.date&&dayDistance(t.date,expense.date)<=60).sort((a,b)=>Math.abs(b.amount)-Math.abs(a.amount)),selected=[];
+    let total=0;
+    for(const candidate of candidates){const value=Math.abs(candidate.amount);if(total+value<=maximum){selected.push(candidate);total+=value;}}
+    if(selected.length&&total>=expense.amount*.975&&selected.some(t=>Math.abs(t.amount)>=expense.amount*.25)){
+      expense.originalCategory=expense.category;expense.kind='reimbursed_expense';expense.category='Reimbursed pass-through';expense.review=false;expense.classificationReason='large purchase matched to later e-transfer reimbursements';expense.reimbursementTotal=Math.round(total*100)/100;
+      for(const row of selected){row.kind='reimbursement';row.category='Reimbursed pass-through';row.review=false;row.reimbursedExpenseId=expense.id;row.classificationReason='matched to reimbursed purchase';}
+    }
+  }
   return rows;
 }
 
 export function summarize(transactions){
   const rows=transactions.filter(t=>!t.pending&&t.currency==='CAD');
-  const income=rows.filter(t=>t.kind==='income').reduce((s,t)=>s-Math.round(t.amount*100),0)/100;
+  const earnedIncome=rows.filter(t=>t.kind==='income').reduce((s,t)=>s-Math.round(t.amount*100),0)/100;
+  const contributions=rows.filter(t=>t.kind==='contribution').reduce((s,t)=>s-Math.round(t.amount*100),0)/100;
+  const income=Math.round((earnedIncome+contributions)*100)/100;
   const spending=rows.filter(t=>['expense','refund'].includes(t.kind)).reduce((s,t)=>s+Math.round(t.amount*100),0)/100;
   const payments=rows.filter(t=>t.kind==='credit_payment').reduce((s,t)=>s+Math.round(Math.abs(t.amount)*100),0)/100;
   const refunds=rows.filter(t=>t.kind==='refund').reduce((s,t)=>s+Math.round(Math.abs(t.amount)*100),0)/100;
-  return {income,spending,payments,refunds,surplus:Math.round((income-spending)*100)/100,savingsRate:income>0?(income-spending)/income*100:null};
+  const reimbursements=rows.filter(t=>t.kind==='reimbursement').reduce((s,t)=>s+Math.round(Math.abs(t.amount)*100),0)/100;
+  const passThrough=rows.filter(t=>t.kind==='reimbursed_expense').reduce((s,t)=>s+Math.round(Math.abs(t.amount)*100),0)/100;
+  return {income,earnedIncome,contributions,spending,payments,refunds,reimbursements,passThrough,surplus:Math.round((income-spending)*100)/100,savingsRate:income>0?(income-spending)/income*100:null};
 }
 
 export function exponentiallyWeightedAverage(values,weight=.35){
   const clean=values.map(Number).filter(Number.isFinite);
   if(!clean.length)return 0;
   return clean.slice(1).reduce((average,value)=>weight*value+(1-weight)*average,clean[0]);
+}
+
+export function robustWeightedAverage(values,weight=.35){
+  const clean=values.map(Number).filter(Number.isFinite);
+  if(!clean.length)return 0;
+  const sorted=[...clean].sort((a,b)=>a-b),middle=Math.floor(sorted.length/2),median=sorted.length%2?sorted[middle]:(sorted[middle-1]+sorted[middle])/2,deviations=clean.map(value=>Math.abs(value-median)).sort((a,b)=>a-b),dMiddle=Math.floor(deviations.length/2),mad=deviations.length%2?deviations[dMiddle]:(deviations[dMiddle-1]+deviations[dMiddle])/2,scale=mad*1.4826,lower=Math.max(0,scale?median-2.5*scale:median*.5),upper=scale?median+2.5*scale:median*1.5;
+  return exponentiallyWeightedAverage(clean.map(value=>Math.min(upper,Math.max(lower,value))),weight);
 }
 
 export function applyChanges(existing,pages){
