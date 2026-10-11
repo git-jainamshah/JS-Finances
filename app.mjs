@@ -126,7 +126,10 @@ export default async function handler(req,res){
       const payload={user:{client_user_id:'local-personal-user'},client_name:'Jainam Finance',language:'en',country_codes:['CA']};
       if(body.itemId){const i=(await items(environment)).find(x=>x.id===body.itemId);if(!i)return send(404,{error:'Connection not found'});payload.access_token=unseal(i.token);}
       else {payload.products=['transactions'];payload.transactions={days_requested:730};}
-      if(environment==='production'&&process.env.PLAID_REDIRECT_URI)payload.redirect_uri=process.env.PLAID_REDIRECT_URI;
+      if(environment==='production'){
+        payload.link_customization_name=process.env.PLAID_LINK_CUSTOMIZATION || 'jainam_finances_prod';
+        payload.redirect_uri=process.env.PLAID_REDIRECT_URI || `${origin}/`;
+      }
       const r=await plaid(environment,'/link/token/create',payload);return send(200,{link_token:r.link_token});
     }
     if(url.pathname==='/api/exchange'){

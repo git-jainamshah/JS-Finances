@@ -35,7 +35,8 @@ The configured local owner account has already been created in this workspace. I
 | `PLAID_ENV` | Optional default view: `sandbox` or `production`. The dashboard can switch between both. |
 | `PLAID_CLIENT_ID` | Optional compatibility fallback. Prefer saving credentials in the authenticated Plaid settings screen. |
 | `PLAID_SECRET` | Optional compatibility fallback for the environment selected by `PLAID_ENV`. |
-| `PLAID_REDIRECT_URI` | If required by the institution, register this exact HTTPS URI in Plaid. Usually your app's root URL with trailing slash. |
+| `PLAID_REDIRECT_URI` | Optional override for the Production OAuth return URL. Defaults to `APP_URL` with a trailing slash; register that exact HTTPS URI in Plaid. |
+| `PLAID_LINK_CUSTOMIZATION` | Optional Production Link customization name. Defaults to `jainam_finances_prod`. |
 
 Generate `BETTER_AUTH_SECRET` and `DATA_ENCRYPTION_KEY` independently with a password manager or `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"`. Enter secret values only in your local environment or Vercel's environment settings, never in source files, commit messages or chat.
 
