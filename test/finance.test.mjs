@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {normalize,classifyTransactions,summarize,applyChanges,demoData} from '../finance.mjs';
+import {accountClass,normalize,classifyTransactions,summarize,applyChanges,demoData} from '../finance.mjs';
 const t=(id,amount,primary,detailed='',extra={},account={})=>normalize({transaction_id:id,account_id:account.account_id,amount,date:extra.date||'2026-09-15',personal_finance_category:{primary,detailed,confidence_level:'HIGH'},iso_currency_code:'CAD',...extra},'',account);
 test('income, refunds, transfers, card payments, pending and foreign currencies',()=>{
  const rows=[t('salary',-5000,'INCOME'),t('purchase',1000,'GENERAL_MERCHANDISE'),t('refund',-100,'GENERAL_MERCHANDISE'),t('transfer',-500,'TRANSFER_IN'),t('cardpay',900,'LOAN_PAYMENTS','LOAN_PAYMENTS_CREDIT_CARD_PAYMENT'),t('pending',400,'FOOD_AND_DRINK','',{pending:true}),t('usd',800,'TRAVEL','',{iso_currency_code:'USD'})];
@@ -11,8 +11,10 @@ test('credit-card payments are transfers, never income',()=>{
  const card={account_id:'amex',type:'credit',subtype:'credit card',name:'Cobalt'};
  const payment=t('payment',-2546.62,'INCOME','',{name:'PAYMENT RECEIVED - THANK YOU'},card);
  assert.equal(payment.kind,'credit_payment');assert.equal(payment.category,'Credit card payments');
+ assert.equal(payment.review,false);
  assert.deepEqual(summarize([payment]),{income:0,spending:0,payments:2546.62,refunds:0,surplus:0,savingsRate:null});
 });
+test('credit accounts with a line-of-credit subtype are identified correctly',()=>{assert.equal(accountClass({type:'credit',subtype:'line of credit'}),'credit_line');});
 test('matching card payments and merchant refunds use account context',()=>{
  const accounts=[{account_id:'cash',type:'depository',subtype:'checking',name:'Chequing'},{account_id:'card',type:'credit',subtype:'credit card',name:'Card'}];
  const raw=[

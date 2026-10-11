@@ -4,8 +4,8 @@ const labels={FOOD_AND_DRINK:'Food & dining',GENERAL_MERCHANDISE:'Shopping',RENT
 
 export function accountClass(account={}){
   const type=String(account.type||'').toLowerCase(),subtype=String(account.subtype||'').toLowerCase();
-  if(type==='credit'||/credit card|paypal/.test(subtype))return 'credit_card';
   if(/line of credit|home equity|overdraft/.test(subtype))return 'credit_line';
+  if(type==='credit'||/credit card|paypal/.test(subtype))return 'credit_card';
   if(type==='loan')return 'loan';
   if(type==='investment')return 'investment';
   return 'cash';
@@ -21,7 +21,7 @@ export function normalize(t,institution='',account={}){
   const baseCategory=detail.includes('GROCERIES')?'Groceries':labels[primary]||primary.replaceAll('_',' ').toLowerCase();
   const category=cardPayment?'Credit card payments':plaidTransfer?'Transfers':kind==='refund'&&refundWords.test(name)?'Refunds':baseCategory;
   const confidence=p.confidence_level||null,ambiguousCredit=credit&&t.amount<0&&!cardPayment&&!refundWords.test(name);
-  return {id:t.transaction_id,accountId:t.account_id,date:t.date,name,amount:t.amount,currency:t.iso_currency_code||t.unofficial_currency_code||'Unknown',pending:!!t.pending,category,kind,institution,accountName:account.name||'',accountType:account.type||'',accountSubtype:account.subtype||'',accountClass:classification,review:ambiguousCredit||!p.primary||!['HIGH','VERY_HIGH'].includes(confidence),classificationReason:cardPayment?'credit-account payment description':plaidTransfer?'Plaid transfer category':income?'Plaid income category':kind==='refund'?(refundWords.test(name)?'refund description':'credit or negative transaction'):'Plaid spending category'};
+  return {id:t.transaction_id,accountId:t.account_id,date:t.date,name,amount:t.amount,currency:t.iso_currency_code||t.unofficial_currency_code||'Unknown',pending:!!t.pending,category,kind,institution,accountName:account.name||'',accountType:account.type||'',accountSubtype:account.subtype||'',accountClass:classification,review:cardPayment?false:ambiguousCredit||!p.primary||!['HIGH','VERY_HIGH'].includes(confidence),classificationReason:cardPayment?'credit-account payment description':plaidTransfer?'Plaid transfer category':income?'Plaid income category':kind==='refund'?(refundWords.test(name)?'refund description':'credit or negative transaction'):'Plaid spending category'};
 }
 
 const dayDistance=(a,b)=>Math.abs((new Date(`${a}T12:00:00`)-new Date(`${b}T12:00:00`))/86400000);
