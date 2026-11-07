@@ -1,6 +1,6 @@
 # Jainam Finance
 
-A private personal finance dashboard for Scotiabank, RBC and American Express. Includes interactive spending charts, income and savings metrics, transaction search, cash-flow scenarios, read-only Plaid connectivity, and a sign-in gate backed by Better Auth.
+A private personal finance dashboard for Scotiabank, RBC and American Express. Pages: Overview (customizable cards), Spending, Recurring (bills, subscriptions and newly repeating charges), Loans & IOUs, Projections (plain-language what-if planning), Transactions (saved views, recategorizing with rules), Chat (ask questions about your finances, powered by Claude) and Settings. Read-only Plaid connectivity and a sign-in gate backed by Better Auth.
 
 ## Local development
 
@@ -37,6 +37,8 @@ The configured local owner account has already been created in this workspace. I
 | `PLAID_SECRET` | Optional compatibility fallback for the environment selected by `PLAID_ENV`. |
 | `PLAID_REDIRECT_URI` | Optional override for the Production OAuth return URL. Defaults to `APP_URL` with a trailing slash; register that exact HTTPS URI in Plaid. |
 | `PLAID_LINK_CUSTOMIZATION` | Optional Production Link customization name. Defaults to `jainam_finances_prod`. |
+| `ANTHROPIC_API_KEY` | Optional. Enables the Chat page. Without it, Chat shows a setup message and nothing is sent anywhere. |
+| `ANTHROPIC_MODEL` | Optional model override for Chat. Defaults to `claude-opus-5-5`. |
 
 Generate `BETTER_AUTH_SECRET` and `DATA_ENCRYPTION_KEY` independently with a password manager or `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"`. Enter secret values only in your local environment or Vercel's environment settings, never in source files, commit messages or chat.
 
@@ -63,7 +65,11 @@ Pull the latest commit and redeploy with the build command `npm run build`. The 
 - `.env*`, `.data/` and `.vercel/` are excluded from Git. The local SQLite directory has restrictive permissions. The app never serves arbitrary filesystem paths.
 - The application is **single owner**. Keep OWNER_EMAIL stable. There is no password-recovery email flow; losing the password requires an administrator recovery procedure against the database. Do not set a new INITIAL_PASSWORD expecting it to overwrite an existing password.
 
-The dashboard uses Google Fonts for typography and loads Plaid Link when connecting. It does not transmit financial data to an AI provider by itself.
+The dashboard uses Google Fonts for typography, loads bank logos from Google's website-icon service, and loads Plaid Link when connecting.
+
+**Chat and your data.** When you ask a question on the Chat page, the server sends Anthropic's Claude API a summary of your data (account balances, monthly totals by category, budgets, detected bills, your category rules and the loans you added) plus the transactions returned by searches the model runs. Nothing is sent unless you ask a question and `ANTHROPIC_API_KEY` is set. Transaction descriptions are treated as untrusted data in the prompt. Chat uses Anthropic's server-side refusal fallback (`fallbacks: "default"`), which can retry a declined answer on another Claude model.
+
+**Workspace data.** Loans & IOUs, budgets, category rules, saved views, dashboard layout, pinned answers and chat history are stored as JSON in the `app_state` table of the same database (created automatically). Sample-data mode and connected-accounts mode keep separate copies.
 
 ## Plaid setup
 
@@ -94,6 +100,13 @@ Demo data, sandbox connections and production connections stay separate. Local c
 For VS Code MCP clients supporting the `servers` format, copy `mcp.example.json` to `.vscode/mcp.json`. It prompts for `FINANCE_EMAIL` and a masked `FINANCE_PASSWORD`; do not hardcode passwords. Other clients may require a different configuration format. A password change invalidates the adapter's session; update the password in your client and restart the adapter.
 
 `FINANCE_DATA_MODE=demo` uses sample data; `live` reads the running server's current Plaid environment. Enabling the adapter shares its tool results with your chosen AI agent; cloud-backed agents can send those results to their model provider. Transaction descriptions are untrusted data and must never be treated as instructions. The adapter currently connects only to localhost; no hosted API-key bypass exists.
+
+## Rolling back
+
+Every change ships through GitHub, so earlier versions stay retrievable:
+
+- **Fastest:** in Vercel, open **Deployments**, pick the last good deployment and choose **Instant Rollback** (or **Promote to Production**).
+- **In Git:** the pre-redesign version is tagged `pre-redesign-v1`. To restore it, revert the merge commit on `main` (`git revert -m 1 <merge-sha>`) and push; Vercel redeploys automatically. The new `app_state` table is ignored by older versions, so rolling back is safe.
 
 ## Validation
 

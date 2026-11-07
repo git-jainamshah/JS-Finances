@@ -98,13 +98,48 @@ export function applyChanges(existing,pages){
 }
 
 export function demoData(){
-  const accounts=[{id:'scotia',name:'Everyday chequing',institution:'Scotiabank',type:'depository',subtype:'checking',class:'cash',mask:'4821',balance:8240.50,available:7900,limit:null,currency:'CAD'},{id:'rbc',name:'High interest savings',institution:'RBC',type:'depository',subtype:'savings',class:'cash',mask:'0916',balance:18750,available:18750,limit:null,currency:'CAD'},{id:'amex',name:'Cobalt card',institution:'American Express',type:'credit',subtype:'credit card',class:'credit_card',mask:'1008',balance:1248.36,available:8751.64,limit:10000,currency:'CAD'}];
-  const transactions=[],now=new Date();
-  const push=(month,day,name,amount,category,kind,accountId)=>{const d=new Date(now.getFullYear(),now.getMonth()-month,day,12);if(d>now)return;const a=accounts.find(x=>x.id===accountId);transactions.push({id:`demo-${transactions.length}`,accountId,date:`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`,name,amount,currency:'CAD',category,kind,pending:false,review:false,institution:a.institution,accountName:a.name,accountType:a.type,accountSubtype:a.subtype,accountClass:a.class});};
-  for(let m=23;m>=0;m--){
-    push(m,1,'Payroll deposit',-3200,'Income','income','scotia');push(m,15,'Payroll deposit',-3200,'Income','income','scotia');push(m,2,'Monthly rent',1850,'Home & bills','expense','scotia');push(m,4,'Internet',65,'Home & bills','expense','scotia');push(m,6,'Spotify',12.99,'Entertainment','expense','amex');push(m,12,'Netflix',20.99,'Entertainment','expense','amex');push(m,20,'Hydro',84+m%5*3,'Home & bills','expense','scotia');push(m,18,'Savings transfer',800,'Transfers','transfer','scotia');push(m,18,'Savings transfer',-800,'Transfers','transfer','rbc');push(m,22,'Amex payment',1100,'Credit card payments','transfer','scotia');push(m,23,'PAYMENT RECEIVED - THANK YOU',-1100,'Credit card payments','credit_payment','amex');
-    for(let d=3;d<=27;d+=4){push(m,d,'Farm Boy',Math.round((76+((d*7+m*13)%55))*100)/100,'Groceries','expense','amex');push(m,d+1,['Pilot Coffee','Freshii','Local restaurant'][d%3],18+(d*3+m*9)%68,'Food & dining','expense','amex');}
-    push(m,10,'PRESTO',108,'Transport','expense','amex');push(m,24,'Indigo',62+m%6*14,'Shopping','expense','amex');if(m%4===0)push(m,26,'Indigo refund',-62,'Refunds','refund','amex');
+  // Deterministic sample workspace, generated relative to today so it always looks current.
+  const now=new Date(),TODAY=new Date(now.getFullYear(),now.getMonth(),now.getDate(),12);
+  let seed=20261103;const rnd=()=>{seed=(seed*16807)%2147483647;return (seed-1)/2147483646;};
+  const R=(a,b)=>Math.round((a+rnd()*(b-a))*100)/100,pick=a=>a[Math.floor(rnd()*a.length)],N=(a,b)=>a+Math.floor(rnd()*(b-a+1));
+  const pad=n=>String(n).padStart(2,'0'),iso=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  const accounts=[
+   {id:'sc-chq',institution:'Scotiabank',name:'Ultimate Chequing',officialName:'',mask:'4821',type:'depository',subtype:'checking',class:'cash',balance:6842.17,available:6842.17,limit:null,currency:'CAD'},
+   {id:'sc-sav',institution:'Scotiabank',name:'MomentumPLUS Savings',officialName:'',mask:'1190',type:'depository',subtype:'savings',class:'cash',balance:14250,available:14250,limit:null,currency:'CAD'},
+   {id:'rbc-avion',institution:'RBC',name:'Avion Visa Infinite',officialName:'',mask:'7732',type:'credit',subtype:'credit card',class:'credit_card',balance:1284.55,available:8715.45,limit:10000,currency:'CAD'},
+   {id:'amex',institution:'American Express',name:'Cobalt Card',officialName:'',mask:'1008',type:'credit',subtype:'credit card',class:'credit_card',balance:742.30,available:7257.70,limit:8000,currency:'CAD'},
+   {id:'honda',institution:'RBC',name:'Honda Finance auto loan',officialName:'',mask:'5530',type:'loan',subtype:'auto',class:'loan',balance:14620,available:null,limit:null,currency:'CAD'}
+  ];
+  const acct=Object.fromEntries(accounts.map(a=>[a.id,a])),transactions=[];
+  const add=(date,name,amount,category,accountId,kind='expense')=>{if(date>TODAY)return;const a=acct[accountId];transactions.push({id:`demo-${transactions.length+1}`,accountId,date:iso(date),name,amount:Math.round(amount*100)/100,currency:'CAD',category,kind,pending:false,review:false,institution:a.institution,accountName:a.name,accountType:a.type,accountSubtype:a.subtype,accountClass:a.class});};
+  // [name, amount, day, category, account, first month (months ago)]
+  const subs=[['NETFLIX.COM',20.99,5,'Entertainment','amex',24],['SPOTIFY P1',11.99,9,'Entertainment','amex',24],['APPLE.COM/BILL ICLOUD',3.99,12,'Services','rbc-avion',24],['ADOBE CREATIVE CLOUD',29.99,18,'Services','rbc-avion',20],['GOODLIFE FITNESS',64.99,1,'Personal care','rbc-avion',24],['ROGERS WIRELESS',95,22,'Home & bills','rbc-avion',24],['TD INSURANCE AUTO',168.40,28,'Home & bills','sc-chq',24],['CRAVE',22.59,14,'Entertainment','amex',5]];
+  for(let i=24;i>=0;i--){
+   const base=new Date(TODAY.getFullYear(),TODAY.getMonth()-i,1,12),y=base.getFullYear(),m=base.getMonth(),dim=new Date(y,m+1,0).getDate(),D=d=>new Date(y,m,Math.min(d,dim),12),pay=i<=10?3120:2950;
+   add(D(1),'ACME CORP PAYROLL',-pay,'Income','sc-chq','income');add(D(15),'ACME CORP PAYROLL',-pay,'Income','sc-chq','income');
+   add(D(1),'SIGNET PROPERTIES RENT',i<=14?2225:2150,'Rent','sc-chq');
+   add(D(15),'HONDA FINANCE',486,'Loan payments','sc-chq');
+   add(D(2),'TRANSFER TO SAVINGS',600,'Transfers','sc-chq','transfer');
+   for(const [n,a,d,c,ac,since] of subs)if(i<=since)add(D(d),n,n==='SPOTIFY P1'&&i<=13?12.99:n==='NETFLIX.COM'&&i<=7?23.99:a,c,ac);
+   if(i<=4)add(D(3),'OPENAI CHATGPT PLUS',28,'Services','rbc-avion');if(i<=3)add(D(7),'DISNEY PLUS',14.99,'Entertainment','amex');
+   add(D(20),'TORONTO HYDRO',R(68,[0,1,6,7,11].includes(m)?142:96),'Home & bills','sc-chq');
+   if(rnd()<.45)add(D(3),'SCOTIABANK MONTHLY FEE',16.95,'Bank fees','sc-chq');
+   const season=m===11?1.35:m===10?1.12:1;
+   for(let k=0,n=N(5,7);k<n;k++){const s=pick(['LOBLAWS','FARM BOY','COSTCO WHOLESALE','NO FRILLS','LOBLAWS']);add(D(N(1,dim)),s,R(s.startsWith('COSTCO')?120:38,s.startsWith('COSTCO')?260:135)*season,'Groceries',pick(['amex','amex','rbc-avion']));}
+   for(let k=0,n=N(9,15);k<n;k++){const s=pick(['UBER EATS','STARBUCKS','PIZZERIA LIBRETTO','TIM HORTONS','PAI NORTHERN THAI','UBER EATS','STARBUCKS']),rg={'UBER EATS':[22,62],'STARBUCKS':[5,9],'PIZZERIA LIBRETTO':[42,96],'TIM HORTONS':[3,12],'PAI NORTHERN THAI':[48,118]}[s];add(D(N(1,dim)),s,R(...rg)*(m===11?1.2:1),'Food & dining','amex');}
+   for(let k=0,n=N(2,3);k<n;k++)add(D(N(1,dim)),'PETRO-CANADA',R(48,88),'Transport','rbc-avion');
+   add(D(N(1,10)),'PRESTO TRANSIT',R(40,120),'Transport','rbc-avion');for(let k=0,n=N(0,3);k<n;k++)add(D(N(1,dim)),'UBER TRIP',R(12,42),'Transport','amex');
+   for(let k=0,n=N(2,4);k<n;k++)add(D(N(1,dim)),'AMAZON.CA',R(14,145)*season,'Shopping',pick(['rbc-avion','amex']));
+   if(rnd()<.35)add(D(N(1,dim)),'UNIQLO TORONTO',R(45,160),'Shopping','rbc-avion');
+   if(m===10||m===11||rnd()<.08)add(D(N(5,dim)),'BEST BUY',R(220,780),'Shopping','rbc-avion');
+   for(let k=0,n=N(1,2);k<n;k++)add(D(N(1,dim)),'SHOPPERS DRUG MART',R(14,62),'Personal care','rbc-avion');
+   if(i===16||i===5){add(D(4),'AIR CANADA',i===16?684.2:812.6,'Travel','rbc-avion');add(D(5),'AIRBNB',i===16?540:695,'Travel','rbc-avion');}
+   if(rnd()<.2)add(D(N(1,dim)),'AMAZON.CA REFUND',-R(20,90),'Shopping','rbc-avion','refund');
+   add(D(26),'PAYMENT - THANK YOU',-R(1400,2600),'Credit card payments','rbc-avion','credit_payment');add(D(27),'AMEX PAYMENT RECEIVED',-R(700,1300),'Credit card payments','amex','credit_payment');
   }
-  return {accounts,transactions:transactions.sort((a,b)=>b.date.localeCompare(a.date)),connections:[],demo:true};
+  // A one-off charge in the last few weeks that may turn into a subscription.
+  const recent=new Date(TODAY);recent.setDate(recent.getDate()-12);add(recent,'AUDIBLE CA',14.95,'Entertainment','amex');
+  transactions.sort((a,b)=>b.date.localeCompare(a.date)||a.id.localeCompare(b.id));
+  const cut=new Date(TODAY);cut.setDate(cut.getDate()-5);transactions.filter(t=>t.date>=iso(cut)&&t.kind==='expense').slice(0,2).forEach(t=>t.pending=true);
+  return {accounts,transactions,connections:[],demo:true};
 }
