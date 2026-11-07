@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
-import {configurationIssues} from '../lib/config.mjs';
+import {configurationIssues,appOrigin} from '../lib/config.mjs';
 
 test('Vercel build without environment variables succeeds without database setup',()=>{
  const env={...process.env,VERCEL:'1',NODE_ENV:'production'};
@@ -20,6 +20,14 @@ test('production configuration reports all missing requirements without exposing
  assert.match(configurationIssues({...configured,APP_URL:'http://finance.example.com'}).join(','),/HTTPS/);
  assert.match(configurationIssues({...configured,DATA_ENCRYPTION_KEY:'secret-not-valid'}).join(','),/32 bytes/);
  assert.ok(!configurationIssues({...configured,DATA_ENCRYPTION_KEY:'secret-not-valid'}).join(',').includes('secret-not-valid'));
+});
+test('preview deployments use the branch address; production keeps APP_URL',()=>{
+ const base={VERCEL:'1',OWNER_EMAIL:'owner@example.test',BETTER_AUTH_SECRET:'s'.repeat(40),DATABASE_URL:'postgres://private',DATA_ENCRYPTION_KEY:Buffer.alloc(32).toString('base64'),VERCEL_BRANCH_URL:'app-git-test-me.vercel.app'};
+ assert.deepEqual(configurationIssues({...base,VERCEL_ENV:'preview'}),[]);
+ assert.deepEqual(configurationIssues({...base,VERCEL_ENV:'preview',APP_URL:'https://prod.example.com'}),[]);
+ assert.equal(appOrigin({...base,VERCEL_ENV:'preview',APP_URL:'https://prod.example.com'}),'https://app-git-test-me.vercel.app');
+ assert.equal(appOrigin({...base,VERCEL_ENV:'production',APP_URL:'https://prod.example.com'}),'https://prod.example.com');
+ assert.match(configurationIssues({...base,VERCEL_ENV:'production'}).join(','),/APP_URL/);
 });
 test('unconfigured hosted handler fails closed with setup response, including all data routes',()=>{
  const env={...process.env,VERCEL:'1',NODE_ENV:'production'};

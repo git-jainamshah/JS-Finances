@@ -5,6 +5,7 @@ import {fromNodeHeaders,toNodeHandler} from 'better-auth/node';
 import {getRuntime,root} from './lib/runtime.mjs';
 import {ConfigurationError} from './lib/config.mjs';
 import {accountClass,classifyTransactions,demoData,applyChanges} from './finance.mjs';
+import {createEngine,chatSystemPrompt,searchTool} from './insights.mjs';
 const plaidEnvironments=['sandbox','production'];
 const defaultEnv=process.env.PLAID_ENV || 'sandbox';
 if(!plaidEnvironments.includes(defaultEnv))throw Error('PLAID_ENV must be sandbox or production');
@@ -59,13 +60,44 @@ async function liveData(environment){
   const transactions=rows.flatMap(i=>{const itemAccounts=JSON.parse(i.accounts);return classifyTransactions(JSON.parse(i.transactions),itemAccounts,i.institution);}).sort((a,b)=>b.date.localeCompare(a.date));
   return {demo:false,environment,accounts,transactions,coverage:{start:transactions.at(-1)?.date||null,end:transactions[0]?.date||null},connections:rows.map(i=>({id:i.id,institution:i.institution,synced:i.synced}))};
 }
-const staticFiles={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/style.css':['style.css','text/css'],'/finance.mjs':['../finance.mjs','text/javascript'],'/login':['login.html','text/html'],'/login.js':['login.js','text/javascript'],'/auth.css':['auth.css','text/css']};
+const staticFiles={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/pages.js':['pages.js','text/javascript'],'/pages2.js':['pages2.js','text/javascript'],'/ui.js':['ui.js','text/javascript'],'/vendor/preact-htm.mjs':['vendor/preact-htm.mjs','text/javascript'],'/style.css':['style.css','text/css'],'/finance.mjs':['../finance.mjs','text/javascript'],'/insights.mjs':['../insights.mjs','text/javascript'],'/login':['login.html','text/html'],'/login.js':['login.js','text/javascript'],'/auth.css':['auth.css','text/css']};
+// Owner-created workspace data (loans, budgets, rules, layout, chat history). One JSON document per key.
+const stateKeys=new Set(['prefs','data:demo','data:live','chat:demo','chat:live']);
+let stateTable;
+const ensureStateTable=()=>stateTable||=getRuntime().query('CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)').catch(e=>{stateTable=null;throw e;});
+async function readState(keys=[...stateKeys]){await ensureStateTable();const out={};for(const row of await getRuntime().query('SELECT key,value,updated_at FROM app_state'))if(keys.includes(row.key)){try{out[row.key]=JSON.parse(row.value);}catch{}}return out;}
+async function dataFor(mode,environment){return mode==='live'?await liveData(environment):{...demoData(),environment};}
+const chatModel=()=>process.env.ANTHROPIC_MODEL||'claude-opus-5-5';
+let anthropicClient;
+async function askAssistant({mode,environment,messages}){
+  if(!process.env.ANTHROPIC_API_KEY)return {status:503,body:{error:'AI_NOT_CONFIGURED',message:'Add ANTHROPIC_API_KEY to the Vercel environment variables and redeploy to enable Chat.'}};
+  const {default:Anthropic}=await import('@anthropic-ai/sdk');
+  anthropicClient||=new Anthropic({apiKey:process.env.ANTHROPIC_API_KEY,timeout:50000,maxRetries:1});
+  const state=await readState([`data:${mode}`]),ws=state[`data:${mode}`]||{};
+  const J=createEngine(await dataFor(mode,environment),{rules:ws.rules||{},overrides:ws.overrides||{},budgets:ws.budgets||{},tracked:ws.tracked||[]});
+  const system=chatSystemPrompt(J,{budgets:ws.budgets||{},rules:ws.rules||{},loans:Array.isArray(ws.loans)?ws.loans:[],tracked:ws.tracked||[]});
+  const convo=messages.map(m=>({role:m.role,content:m.content}));
+  for(let step=0;step<5;step++){
+    const response=await anthropicClient.beta.messages.create({model:chatModel(),max_tokens:4000,output_config:{effort:'low'},betas:['server-side-fallback-2026-07-01'],fallbacks:'default',system,tools:[searchTool],messages:convo});
+    if(response.stop_reason==='refusal')return {status:200,body:{text:'{"answer":"I can’t help with that one. Try asking about your spending, bills, savings or a what-if.","followups":[]}'}};
+    if(response.stop_reason==='pause_turn'){convo.push({role:'assistant',content:response.content});continue;}
+    const toolCalls=response.content.filter(b=>b.type==='tool_use');
+    if(response.stop_reason!=='tool_use'||!toolCalls.length)return {status:200,body:{text:response.content.filter(b=>b.type==='text').map(b=>b.text).join('\n')}};
+    convo.push({role:'assistant',content:response.content});
+    convo.push({role:'user',content:toolCalls.map(call=>{try{return {type:'tool_result',tool_use_id:call.id,content:JSON.stringify(J.search(call.input||{}))};}catch(e){return {type:'tool_result',tool_use_id:call.id,content:'Search failed.',is_error:true};}})});
+  }
+  return {status:200,body:{text:'{"answer":"That took more lookups than expected. Try a narrower question.","followups":[]}'}};
+}
 const authPaths=new Set(['/api/auth/sign-in/email','/api/auth/sign-out','/api/auth/get-session','/api/auth/change-password','/api/auth/ok']);
 export default async function handler(req,res){
   const send=(status,data,type='application/json')=>{res.writeHead(status,{'Content-Type':type,'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','X-Frame-Options':'DENY'});res.end(type==='application/json'?JSON.stringify(data):data);};
   try{
     const runtime=getRuntime(),{origin,auth,owner}=runtime;
-    if(req.headers.host!==new URL(origin).host)return send(403,{error:'Invalid host'});
+    if(req.headers.host!==new URL(origin).host){
+      // A preview's one-off commit address forwards to the stable branch address the app runs on.
+      if(process.env.VERCEL_ENV==='preview'&&process.env.VERCEL_URL&&req.headers.host===process.env.VERCEL_URL&&req.method==='GET'){res.writeHead(302,{Location:new URL(req.url,origin).href,'Cache-Control':'no-store'});return res.end();}
+      return send(403,{error:'Invalid host'});
+    }
     res.setHeader('Cache-Control','private, no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Frame-Options','DENY');res.setHeader('Referrer-Policy','no-referrer');
     if(runtime.hosted)res.setHeader('Strict-Transport-Security','max-age=31536000');
     const url=new URL(req.url,origin);
@@ -92,20 +124,34 @@ export default async function handler(req,res){
     const csrf=session?createHmac('sha256',runtime.secret).update(session.session.token).digest('hex'):null;
     if(req.method==='GET'){
       const environment=readEnvironment(url.searchParams.get('env')||defaultEnv);
-      if(url.pathname==='/api/status'){const config=await plaidConfiguration(environment);return send(200,{configured:!!config,connected:!!config?.verifiedAt,environment,csrf,connections:(await items(environment)).length,email:session.user.email});}
+      if(url.pathname==='/api/status'){const config=await plaidConfiguration(environment);return send(200,{configured:!!config,connected:!!config?.verifiedAt,environment,csrf,connections:(await items(environment)).length,email:session.user.email,ai:!!process.env.ANTHROPIC_API_KEY});}
+      if(url.pathname==='/api/state')return send(200,{state:await readState()});
       if(url.pathname==='/api/plaid-config')return send(200,{environments:await configurationSummary()});
       if(url.pathname==='/api/data')return send(200,url.searchParams.get('mode')==='live'?await liveData(environment):{...demoData(),environment});
-      const file=staticFiles[url.pathname];if(file)return send(200,readFileSync(join(root,'web',file[0])),file[1]);
+      const file=staticFiles[url.pathname];if(file){if(url.pathname==='/vendor/preact-htm.mjs')res.setHeader('Cache-Control','private, max-age=86400');return send(200,readFileSync(join(root,'web',file[0])),file[1]);}
       return send(404,{error:'Not found'});
     }
     const supplied=req.headers['x-csrf-token'];
     if(!csrf || typeof supplied!=='string' || supplied.length!==csrf.length || !timingSafeEqual(Buffer.from(supplied),Buffer.from(csrf)))return send(403,{error:'Reload the dashboard to authorize this request'});
+    const maxBody=url.pathname==='/api/state'?524288:url.pathname==='/api/chat'?65536:16384;
     let raw='';
     if(req.body!==undefined)raw=typeof req.body==='string'?req.body:JSON.stringify(req.body);
-    else for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>16384)return send(413,{error:'Request too large'});}
-    if(Buffer.byteLength(raw)>16384)return send(413,{error:'Request too large'});
+    else for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>maxBody)return send(413,{error:'Request too large'});}
+    if(Buffer.byteLength(raw)>maxBody)return send(413,{error:'Request too large'});
     const body=JSON.parse(raw||'{}');
     const environment=readEnvironment(body.environment||defaultEnv);
+    if(url.pathname==='/api/state'){
+      if(!stateKeys.has(body.key)||body.value===null||typeof body.value!=='object')return send(400,{error:'Invalid workspace data'});
+      await ensureStateTable();const updatedAt=new Date().toISOString();
+      await getRuntime().query('INSERT INTO app_state(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at',[body.key,JSON.stringify(body.value),updatedAt]);
+      return send(200,{ok:true,updatedAt});
+    }
+    if(url.pathname==='/api/chat'){
+      const mode=body.mode==='live'?'live':'demo',messages=Array.isArray(body.messages)?body.messages.slice(-12):[];
+      if(!messages.length||messages.some(m=>!['user','assistant'].includes(m?.role)||typeof m.content!=='string'||!m.content.trim()||m.content.length>6000)||messages[0].role!=='user'||messages.at(-1).role!=='user')return send(400,{error:'Invalid chat request'});
+      try{const result=await askAssistant({mode,environment,messages});return send(result.status,result.body);}
+      catch(e){return send(502,{error:'AI_REQUEST_FAILED',message:e?.status===429?'The assistant is busy right now. Try again in a minute.':e?.status===401?'The ANTHROPIC_API_KEY was rejected. Check it in Vercel.':'The assistant could not answer right now. Try again shortly.'});}
+    }
     if(url.pathname==='/api/plaid-config'){
       const clientId=typeof body.clientId==='string'?body.clientId.trim():'';
       const secret=typeof body.secret==='string'?body.secret.trim():'';

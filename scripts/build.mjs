@@ -3,7 +3,7 @@ import {mkdirSync} from 'node:fs';
 import {configurationIssues} from '../lib/config.mjs';
 
 // Packaging and syntax validation must not require database access or credentials.
-for(const file of ['app.mjs','lib/runtime.mjs','web/app.js','web/login.js','api/index.mjs']){
+for(const file of ['app.mjs','insights.mjs','lib/runtime.mjs','web/app.js','web/pages.js','web/pages2.js','web/ui.js','web/login.js','api/index.mjs']){
  const result=spawnSync(process.execPath,['--check',file],{stdio:'inherit'});
  if(result.status!==0)process.exit(result.status || 1);
 }
