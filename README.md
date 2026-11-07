@@ -106,7 +106,7 @@ For VS Code MCP clients supporting the `servers` format, copy `mcp.example.json`
 Every change ships through GitHub, so earlier versions stay retrievable:
 
 - **Fastest:** in Vercel, open **Deployments**, pick the last good deployment and choose **Instant Rollback** (or **Promote to Production**).
-- **In Git:** the pre-redesign version is tagged `pre-redesign-v1`. To restore it, revert the merge commit on `main` (`git revert -m 1 <merge-sha>`) and push; Vercel redeploys automatically. The new `app_state` table is ignored by older versions, so rolling back is safe.
+- **In Git:** the last pre-redesign commit on `main` is `1c8eca3` (you can tag it with `git tag pre-redesign-v1 1c8eca3 && git push origin pre-redesign-v1`). To restore it, revert the merge commit on `main` (`git revert -m 1 <merge-sha>`) and push; Vercel redeploys automatically. The new `app_state` table is ignored by older versions, so rolling back is safe.
 
 ## Validation
 
