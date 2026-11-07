@@ -48,7 +48,14 @@ Generate `BETTER_AUTH_SECRET` and `DATA_ENCRYPTION_KEY` independently with a pas
 
 Production requests fail closed with HTTP 503 without an HTTPS APP_URL, authentication secret, owner email, encryption key and PostgreSQL. A successful code build alone does not mean the dashboard is configured or ready for financial data. It never falls back to ephemeral SQLite on Vercel. All dashboard assets and data routes pass through the authenticated function; only the login screen, its stylesheet/script and a small allowlist of auth endpoints are public. Do not move `web/` into `public/`, which would bypass this protection.
 
-Preview deployments need their **own database, secrets, owner and exact APP_URL**. Do not give arbitrary preview branches access to the production database. Domain changes also require updating APP_URL and Plaid's registered redirect URI. The repository prepares deployment, but does not provision your database or supply hosted credentials.
+### Testing branches before merging (one-time setup)
+
+Every branch pushed to GitHub gets a Vercel preview at `https://js-finances-git-<branch>-<team>.vercel.app`. Previews work out their own address, so they never need `APP_URL`. Set this up once:
+
+1. **Database:** install the **Neon** integration (Vercel → Integrations, or Storage → your Neon database) and turn on *Create a database branch for preview deployments*. Each preview then gets its own copy of the production database, and `DATABASE_URL` is filled in automatically. Previews never write to production data.
+2. **Variables:** in Project Settings → Environment Variables, add these once with environment **Preview** and *all branches*: `OWNER_EMAIL` and `DATA_ENCRYPTION_KEY` (same values as Production, so the copied data and Plaid connections still decrypt), `BETTER_AUTH_SECRET` (a different random value from Production), and optionally `ANTHROPIC_API_KEY`.
+
+After that, every new branch just works: push, open the preview link, sign in with your normal password. Preview links stay behind Vercel's login as well as the app's own sign-in. Domain changes also require updating APP_URL and Plaid's registered redirect URI. The repository prepares deployment, but does not provision your database or supply hosted credentials.
 
 ### If your first deploy failed with “APP_URL is required”
 

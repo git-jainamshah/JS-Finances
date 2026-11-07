@@ -93,7 +93,11 @@ export default async function handler(req,res){
   const send=(status,data,type='application/json')=>{res.writeHead(status,{'Content-Type':type,'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','X-Frame-Options':'DENY'});res.end(type==='application/json'?JSON.stringify(data):data);};
   try{
     const runtime=getRuntime(),{origin,auth,owner}=runtime;
-    if(req.headers.host!==new URL(origin).host)return send(403,{error:'Invalid host'});
+    if(req.headers.host!==new URL(origin).host){
+      // A preview's one-off commit address forwards to the stable branch address the app runs on.
+      if(process.env.VERCEL_ENV==='preview'&&process.env.VERCEL_URL&&req.headers.host===process.env.VERCEL_URL&&req.method==='GET'){res.writeHead(302,{Location:new URL(req.url,origin).href,'Cache-Control':'no-store'});return res.end();}
+      return send(403,{error:'Invalid host'});
+    }
     res.setHeader('Cache-Control','private, no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Frame-Options','DENY');res.setHeader('Referrer-Policy','no-referrer');
     if(runtime.hosted)res.setHeader('Strict-Transport-Security','max-age=31536000');
     const url=new URL(req.url,origin);
