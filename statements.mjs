@@ -125,9 +125,12 @@ export function learnCategories(rawTransactions){
 // Merge a parsed statement into the stored import record (idempotent: re-imports never duplicate).
 export function mergeImport(existing,parsed){
  const record=existing?structuredClone(existing):{key:parsed.account.key,institution:parsed.institution,account:parsed.account,statements:[],transactions:[]};
+ // A reissued card replaces the old one over time; two cards with statements for the same month are separate accounts.
+ const clash=record.statements.find(s=>s.end===parsed.period.end&&s.mask&&s.mask!==parsed.account.mask);
+ if(clash)throw new StatementError('DIFFERENT_CARD_SAME_PERIOD',`A statement for card ending ${clash.mask} already covers this period, so card ending ${parsed.account.mask} looks like a separate card. Importing a second card of the same type isn’t supported yet.`);
  const byId=new Map(record.transactions.map(t=>[t.id,t]));for(const t of parsed.transactions)byId.set(t.id,t);
  record.transactions=[...byId.values()].sort((a,b)=>b.date.localeCompare(a.date));
- const st=record.statements.filter(s=>s.end!==parsed.period.end);st.push({start:parsed.period.start,end:parsed.period.end,previous:parsed.previous,total:parsed.total,count:parsed.transactions.length,limit:parsed.account.limit});
+ const st=record.statements.filter(s=>s.end!==parsed.period.end);st.push({start:parsed.period.start,end:parsed.period.end,previous:parsed.previous,total:parsed.total,count:parsed.transactions.length,limit:parsed.account.limit,mask:parsed.account.mask});
  record.statements=st.sort((a,b)=>a.end.localeCompare(b.end));
  const latest=record.statements.at(-1),newest=parsed.period.end>=latest.end;
  record.account={...(newest?{...record.account,...parsed.account}:record.account),limit:latest.limit??record.account.limit,balance:latest.total,asOf:latest.end};

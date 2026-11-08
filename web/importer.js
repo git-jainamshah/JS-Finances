@@ -23,6 +23,9 @@ export async function unzip(bytes,depth=0){
 export async function collectStatements(fileList){
  const out=[];
  for(const f of fileList){const bytes=new Uint8Array(await f.arrayBuffer());if(/\.zip$/i.test(f.name))out.push(...await unzip(bytes));else if(/\.pdf$/i.test(f.name))out.push({name:f.name,bytes});}
- const seen=new Set();return out.filter(f=>{const k=`${f.name}|${f.bytes.length}`;if(seen.has(k))return false;seen.add(k);return true;}).sort((a,b)=>a.name.localeCompare(b.name));
+ // Skip exact duplicates by content; the server also deduplicates transactions.
+ const seen=new Set(),unique=[];
+ for(const f of out){const h=[...new Uint8Array(await crypto.subtle.digest('SHA-256',f.bytes))].map(b=>b.toString(16).padStart(2,'0')).join('');if(!seen.has(h)){seen.add(h);unique.push(f);}}
+ return unique.sort((a,b)=>a.name.localeCompare(b.name));
 }
 export function toBase64(bytes){let s='';for(let i=0;i<bytes.length;i+=0x8000)s+=String.fromCharCode.apply(null,bytes.subarray(i,i+0x8000));return btoa(s);}

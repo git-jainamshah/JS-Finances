@@ -38,6 +38,11 @@ test('re-imports never duplicate and a reissued card stays one account',()=>{
  let r=mergeImport(null,newer);r=mergeImport(r,older);r=mergeImport(r,newer);
  assert.equal(r.transactions.length,2);assert.equal(r.statements.length,2);assert.equal(r.account.mask,'4039');assert.equal(r.account.balance,33.99);assert.equal(r.account.limit,18000);
 });
+test('two different cards for the same month are not merged',()=>{
+ const a=parseRbcCreditCard(statement({last4:'1111',previous:'$0.00',total:'$10.00',lines:tx('JAN 02','JAN 03','SPOTIFY','$10.00','7'.repeat(23))}));
+ const b=parseRbcCreditCard(statement({last4:'2222',previous:'$0.00',total:'$20.00',lines:tx('JAN 02','JAN 03','NETFLIX.COM','$20.00','8'.repeat(23))}));
+ assert.throws(()=>mergeImport(mergeImport(null,a),b),/separate card/);
+});
 test('imported card data flows through normal classification',()=>{
  const p=parseRbcCreditCard(statement({total:'$45.64',lines:[...tx('JAN 02','JAN 03','TIM HORTONS #1 TORONTO ON','$5.64','4'.repeat(23)),...tx('JAN 03','JAN 03','SOME NEW SHOP TORONTO ON','$40.00','5'.repeat(23)),...tx('JAN 04','JAN 04','PAYMENT - THANK YOU / PAIEMENT - MERCI','-$100.00'),...tx('JAN 04','JAN 04','IQBAL FOODS TORONTO ON','$100.00','6'.repeat(23))]}));
  const learned=learnCategories([{name:'Some New Shop',personal_finance_category:{primary:'GENERAL_MERCHANDISE',detailed:'GENERAL_MERCHANDISE_CLOTHING_AND_ACCESSORIES',confidence_level:'HIGH'}}]);

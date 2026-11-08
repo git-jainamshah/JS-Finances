@@ -172,7 +172,8 @@ export default async function handler(req,res){
       if(!parsed.reconciled)return send(422,{error:'STATEMENT_DOES_NOT_BALANCE',message:`The transactions read from this statement are off by ${parsed.difference.toFixed(2)} compared with its totals, so it wasn’t saved.`,period:parsed.period});
       await ensureImportTable();
       const id=`${environment}:${parsed.account.key}`,[row]=await getRuntime().query('SELECT record FROM imported_accounts WHERE id=?',[id]),before=row?JSON.parse(row.record):null;
-      const record=mergeImport(before,parsed),added=record.transactions.length-(before?.transactions.length||0),updatedAt=new Date().toISOString();
+      let record;try{record=mergeImport(before,parsed);}catch(e){if(e instanceof StatementError)return send(422,{error:e.code,message:e.message,period:parsed.period});throw e;}
+      const added=record.transactions.length-(before?.transactions.length||0),updatedAt=new Date().toISOString();
       await getRuntime().query('INSERT INTO imported_accounts(id,env,record,updated_at) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET record=excluded.record,updated_at=excluded.updated_at',[id,environment,JSON.stringify(record),updatedAt]);
       return send(200,{ok:true,account:{name:record.account.name,mask:record.account.mask},period:parsed.period,transactions:parsed.transactions.length,added,total:record.transactions.length});
     }
