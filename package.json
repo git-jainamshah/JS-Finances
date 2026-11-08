@@ -13,7 +13,7 @@
     "test": "node --test test/*.test.mjs",
     "test:smoke": "node test/smoke.mjs",
     "setup": "node --env-file-if-exists=.env scripts/setup.mjs",
-    "check": "node --check app.mjs && node --check insights.mjs && node --check web/app.js && node --check web/pages.js && node --check web/pages2.js && node --check web/ui.js && node --check web/importer.js && node --check statements.mjs && node --check lib/runtime.mjs",
+    "check": "node --check app.mjs && node --check insights.mjs && node --check web/app.js && node --check web/pages.js && node --check web/pages2.js && node --check web/ui.js && node --check web/importer.js && node --check web/plans.js && node --check loans.mjs && node --check statements.mjs && node --check lib/runtime.mjs",
     "build": "node scripts/build.mjs"
   },
   "dependencies": {

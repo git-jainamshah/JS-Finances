@@ -3,20 +3,26 @@ import {createEngine,money,iso,mk,mLong} from '/insights.mjs';
 import {NavIcon,BrandMark,Wordmark,Select,DEFAULT_LAYOUT} from '/ui.js';
 import {Pages} from '/pages.js';
 
-const SAMPLE_LOANS=[{id:'honda',dir:'owe',name:'Honda Civic auto loan',who:'Honda Financial Services',original:24000,balance:14620,payment:486,rate:4.99,day:15,connected:true,institution:'RBC'},{id:'osap',dir:'owe',name:'OSAP student loan',who:'National Student Loans Service Centre',original:18500,balance:6840,payment:260,rate:6.2,day:28,connected:false},{id:'fam',dir:'owe',name:'Help with first & last rent',who:'Mom & Dad',original:5000,balance:3200,payment:200,rate:0,day:1,connected:false},{id:'arjun',dir:'owed',name:'Concert tickets + Montreal trip',who:'Arjun',original:1500,balance:900,payment:150,rate:0,day:30,connected:false}];
+const SAMPLE_LOANS=[{id:'honda',dir:'owe',name:'Honda Civic auto loan',who:'Honda Financial Services',original:24000,balance:14620,payment:486,rate:4.99,day:15,connected:true,institution:'RBC'},{id:'osap',dir:'owe',name:'OSAP student loan',who:'National Student Loans Service Centre',original:18500,balance:6840,payment:260,rate:6.2,day:28,connected:false},{id:'fam',dir:'owe',kind:'someday',name:'Help with first & last rent',who:'Mom & Dad',original:5000,balance:3200,payment:0,rate:0,day:1,targetDate:'2028-06-01',gentle:true,connected:false},{id:'arjun',dir:'owed',name:'Concert tickets + Montreal trip',who:'Arjun',original:1500,balance:900,payment:150,rate:0,day:30,connected:false}];
 export const PAGES=[['overview','Overview','Home'],['spending','Spending','Spending'],['recurring','Recurring','Bills'],['loans','Loans & IOUs','Loans'],['projections','Projections','Plan'],['transactions','Transactions','Activity'],['chat','Chat','Chat'],['settings','Settings','Settings']];
-const PREF_KEYS=['layout','saved','views','density','reduceMotion'],DATA_KEYS=['budgets','rules','overrides','loans','dismissed','tracked'];
+const SAMPLE_GOALS=[{id:'kids',name:'Future kids fund',target:20000,saved:4200,targetDate:'2029-09-01',contributions:[]},{id:'trip',name:'Japan trip',target:6000,saved:1850,targetDate:'2027-10-01',contributions:[]}];
+const PREF_KEYS=['layout','layoutV','saved','views','density','reduceMotion'],DATA_KEYS=['budgets','rules','overrides','loans','goals','dismissed','tracked'],LAYOUT_V=2;
+// Cards added after a layout was saved are inserted once, next to a related card; removing them later sticks.
+const upgradeLayout=(l,v)=>{l=[...l];if((v||1)<2&&!l.includes('goals')){const i=l.indexOf('loans');l.splice(i<0?l.length:i+1,0,'goals');}return l;};
+const todayStr=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
+// Balances entered before payment tracking existed count from the first time they're loaded.
+const withAsOf=loans=>Array.isArray(loans)?loans.map(l=>l.balanceAsOf||l.connected?l:{...l,balanceAsOf:todayStr()}):loans;
 const LOCAL='jsf-ui-v2',ENV_KEY='finance-plaid-environment';
 const readLocal=()=>{try{return JSON.parse(localStorage.getItem(LOCAL)||'{}');}catch{return {};}};
 const newChatId=()=>'c'+Date.now().toString(36)+Math.random().toString(36).slice(2,8);
-const blankData=mode=>({budgets:{},rules:{},overrides:{},loans:mode==='demo'?SAMPLE_LOANS:[],dismissed:[],tracked:[]});
+const blankData=mode=>({budgets:{},rules:{},overrides:{},loans:mode==='demo'?SAMPLE_LOANS:[],goals:mode==='demo'?SAMPLE_GOALS:[],dismissed:[],tracked:[]});
 
 class App extends Component{
  constructor(){
   super();const L=readLocal(),env=localStorage.getItem(ENV_KEY);
   this.state={booting:true,bootError:'',status:null,data:null,plaid:null,mode:'demo',env:['sandbox','production'].includes(env)?env:'sandbox',busy:'',
    page:L.page||'overview',range:L.range||'12m',custom:L.custom||null,inst:'',edit:false,moreOpen:false,cpMonth:'',
-   layout:DEFAULT_LAYOUT,saved:[],views:[],density:'comfortable',reduceMotion:false,...blankData('demo'),msgs:[],chatId:null,chatList:[],historyOpen:false,
+   layout:DEFAULT_LAYOUT,layoutV:LAYOUT_V,saved:[],views:[],density:'comfortable',reduceMotion:false,...blankData('demo'),msgs:[],chatId:null,chatList:[],historyOpen:false,
    loanFilter:'all',loanForm:null,loanErr:'',extra:{},payFor:'',payAmt:'',input:'',loading:false,quick:'',nwHover:null,budgetMonth:'last',
    cat:'',merchant:'',calMonth:'',calDay:'',incChg:0,oneOff:0,oneOffMonth:6,cuts:{},cancel:[],goal:10000,cfHover:null,showCustom:false,cStart:'',cEnd:'',
    q:'',tCat:'',tType:'all',sort:{key:'date',dir:'desc'},limit:40,editTx:'',editCat:'',editRule:true,view:'all',
@@ -52,7 +58,7 @@ class App extends Component{
   }catch(e){this.setState({booting:false,bootError:e.message});}
  }
  componentWillUnmount(){window.removeEventListener('resize',this.onResize);window.removeEventListener('pagehide',this.onUnload);}
- groupFrom(key,mode){const v=this.store[key]||{};if(key==='prefs')return {layout:Array.isArray(v.layout)?v.layout:DEFAULT_LAYOUT,saved:v.saved||[],views:v.views||[],density:v.density||'comfortable',reduceMotion:!!v.reduceMotion};const b=blankData(mode);return Object.fromEntries(DATA_KEYS.map(k=>[k,v[k]??b[k]]));}
+ groupFrom(key,mode){const v=this.store[key]||{};if(key==='prefs')return {layout:Array.isArray(v.layout)?upgradeLayout(v.layout,v.layoutV):DEFAULT_LAYOUT,layoutV:LAYOUT_V,saved:v.saved||[],views:v.views||[],density:v.density||'comfortable',reduceMotion:!!v.reduceMotion};const b=blankData(mode),o=Object.fromEntries(DATA_KEYS.map(k=>[k,v[k]??b[k]]));if(mode==='demo'&&Array.isArray(o.loans))o.loans=o.loans.map(l=>l.id==='fam'&&!l.kind?SAMPLE_LOANS.find(x=>x.id==='fam'):l);o.loans=withAsOf(o.loans);return o;}
  groupValue(key,mode=this.state.mode,S=this.state){if(key==='prefs')return Object.fromEntries(PREF_KEYS.map(k=>[k,S[k]]));if(key.startsWith('data:'))return Object.fromEntries(DATA_KEYS.map(k=>[k,S[k]]));}
  componentDidUpdate(){
   const S=this.state;if(S.booting)return;

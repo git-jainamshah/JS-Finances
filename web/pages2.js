@@ -2,6 +2,7 @@ import {html} from '/vendor/preact-htm.mjs';
 import {mLong,mk} from '/insights.mjs';
 import {BankLogo,LinkPill,SR,Select,Switch,title} from '/ui.js';
 import {H2,Sub,card,grid2,AskBtn,chartView,paras,MoneyInput,inputSt,fieldLabel} from '/pages.js';
+import {PlansSection} from '/plans.js';
 
 const chip=a=>`border:1px solid ${a?'#183c35':'#cdd6ca'};background:${a?'#183c35':'#fff'};color:${a?'#fff':'#183c35'}`;
 const Chips=({opts,label,pad='7px 14px'})=>html`<div role="group" aria-label=${label} style="display:flex;gap:6px;flex-wrap:wrap">${opts.map(o=>html`<button onClick=${o.go} aria-pressed=${o.a} style=${`${chip(o.a)};border-radius:999px;padding:${pad};font-size:13px;font-weight:600;cursor:pointer`}>${o.label}</button>`)}</div>`;
@@ -56,6 +57,7 @@ export function Projections({A,S,J,pad,gap,mobile}){
     <div style="background:#183c35;color:#fff;border-radius:12px;padding:14px 16px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap" aria-live="polite"><div><b style="font:600 15px 'Geist',sans-serif">${anyChange?(dKept>=0?`You’d keep ${A.money(dKept)} more a month`:`You’d keep ${A.money(-dKept)} less a month`):'No changes yet'}</b><div style="font-size:13px;color:#d6e5d0">${anyChange?`That’s ${A.money(Math.abs(dKept*12))} over a year${S.oneOff?`, minus a one-off ${A.money(S.oneOff)}`:''}.`:'Pick something above to see the difference.'}</div></div><${AskBtn} label="✦ Ask if it’s realistic" fill="#d1e5a7" rest="#d1e5a7" extra="font-weight:700" onClick=${askScenario}/></div>
    </section>
   </div>
+  <${PlansSection} A=${A} J=${J} pl=${pl} pad=${pad}/>
   <section aria-labelledby="bal-h" style=${card(pad)}>
    <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><${H2} id="bal-h">Your bank balance, month by month</${H2}><${Sub}>Chequing and savings combined</${Sub}></div>
     <div style="display:flex;gap:16px;font-size:13px;color:#3d4d45;align-items:center;flex-wrap:wrap"><span style="display:flex;align-items:center;gap:6px"><i style="width:18px;border-top:2px dashed #6b7a72"></i>As things are · <b>${A.money(endB)}</b></span>${anyChange?html`<span style="display:flex;align-items:center;gap:6px"><i style="width:18px;height:3px;background:#315e4e;border-radius:2px"></i>With your changes · <b style="color:#2f5d3a">${A.money(endS)}</b></span>`:null}</div></div>
