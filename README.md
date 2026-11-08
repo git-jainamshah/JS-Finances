@@ -104,6 +104,17 @@ Some banks block Plaid (for example RBC's newer sign-in verification). For those
 - Card payments on the statement are treated as transfers, so paying the card from another bank isn't counted twice.
 - Imports are saved under the Plaid environment you're viewing (Production or Sandbox). Use **Remove** on the imported account to delete it.
 
+## Loans, IOUs and savings goals
+
+The Loans & IOUs page tracks four kinds of items, stored in your workspace data (`loans` and `goals`):
+
+- **Loans you're paying back** and **money you lent**. Every field can be edited. A balance you type counts from that day, and later payments reduce it.
+- **Payment matching** (`loans.mjs`). The app looks through your transactions for payments that resemble the loan. It compares names with the lender or the "name on bank statements" field (allowing typos and abbreviations), checks whether the amount is within 2–25% of the monthly payment, and checks the day of the month and how many months the payment repeats. It then suggests a match with its reasons. Nothing is linked until you click **Yes, link these**. Payments from a linked description then count automatically. You can unlink a single transaction from the payment history, or click **Not this** to hide a suggestion for good.
+- **Repay someday** covers money with no payment schedule, for example family help. It is not counted as debt. With a "repay by" month, it shows how much to set aside each month.
+- **Savings goals** have a target, an amount already saved and an optional date. You can add savings as you go.
+
+Repay-someday items and goals also appear in the **Plans & goals** card on Overview and in the **Your plans** section on Projections, which compares the monthly amount needed with what you usually keep. Chat sees them too.
+
 ## Financial calculations
 
 - Posted CAD transactions only; pending and foreign-currency transactions are excluded from metrics. No FX conversion.

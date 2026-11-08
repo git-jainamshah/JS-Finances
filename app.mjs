@@ -6,6 +6,7 @@ import {getRuntime,root} from './lib/runtime.mjs';
 import {ConfigurationError} from './lib/config.mjs';
 import {accountClass,classifyTransactions,demoData,applyChanges} from './finance.mjs';
 import {createEngine,chatSystemPrompt,searchTool} from './insights.mjs';
+import {describeForChat} from './loans.mjs';
 import {parseStatement,mergeImport,importToPlaid,learnCategories,StatementError} from './statements.mjs';
 const plaidEnvironments=['sandbox','production'];
 const defaultEnv=process.env.PLAID_ENV || 'sandbox';
@@ -77,7 +78,7 @@ async function liveData(environment){
   transactions.sort((a,b)=>b.date.localeCompare(a.date));
   return {demo:false,environment,accounts,transactions,coverage:{start:transactions.at(-1)?.date||null,end:transactions[0]?.date||null},connections};
 }
-const staticFiles={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/pages.js':['pages.js','text/javascript'],'/pages2.js':['pages2.js','text/javascript'],'/ui.js':['ui.js','text/javascript'],'/importer.js':['importer.js','text/javascript'],'/vendor/preact-htm.mjs':['vendor/preact-htm.mjs','text/javascript'],'/style.css':['style.css','text/css'],'/finance.mjs':['../finance.mjs','text/javascript'],'/insights.mjs':['../insights.mjs','text/javascript'],'/login':['login.html','text/html'],'/login.js':['login.js','text/javascript'],'/auth.css':['auth.css','text/css']};
+const staticFiles={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/pages.js':['pages.js','text/javascript'],'/pages2.js':['pages2.js','text/javascript'],'/ui.js':['ui.js','text/javascript'],'/importer.js':['importer.js','text/javascript'],'/vendor/preact-htm.mjs':['vendor/preact-htm.mjs','text/javascript'],'/style.css':['style.css','text/css'],'/finance.mjs':['../finance.mjs','text/javascript'],'/insights.mjs':['../insights.mjs','text/javascript'],'/loans.mjs':['../loans.mjs','text/javascript'],'/plans.js':['plans.js','text/javascript'],'/login':['login.html','text/html'],'/login.js':['login.js','text/javascript'],'/auth.css':['auth.css','text/css']};
 // Owner-created workspace data (loans, budgets, rules, layout, chat history). One JSON document per key.
 const stateKeys=new Set(['prefs','data:demo','data:live','chat:demo','chat:live']);
 let stateTable;
@@ -96,7 +97,8 @@ async function askAssistant({mode,environment,messages}){
   anthropicClient||=new Anthropic({apiKey:process.env.ANTHROPIC_API_KEY,timeout:50000,maxRetries:1});
   const state=await readState([`data:${mode}`]),ws=state[`data:${mode}`]||{};
   const J=createEngine(await dataFor(mode,environment),{rules:ws.rules||{},overrides:ws.overrides||{},budgets:ws.budgets||{},tracked:ws.tracked||[]});
-  const system=chatSystemPrompt(J,{budgets:ws.budgets||{},rules:ws.rules||{},loans:Array.isArray(ws.loans)?ws.loans:[],tracked:ws.tracked||[]});
+  const plans=describeForChat(Array.isArray(ws.loans)?ws.loans:[],Array.isArray(ws.goals)?ws.goals:[],J.tx);
+  const system=chatSystemPrompt(J,{budgets:ws.budgets||{},rules:ws.rules||{},plans,tracked:ws.tracked||[]});
   const convo=messages.map(m=>({role:m.role,content:m.content}));
   for(let step=0;step<5;step++){
     const request={model:chatModel(),max_tokens:4000,output_config:{effort:'low'},system,tools:[searchTool],messages:convo};

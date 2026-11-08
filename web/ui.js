@@ -1,7 +1,7 @@
 import {html,Component} from '/vendor/preact-htm.mjs';
 import {logoFor,prettyName} from '/insights.mjs';
 export {html};
-export const DEFAULT_LAYOUT=['kpis','networth','cashflow','budget','radar','subs','loans','credit','projection','accounts'];
+export const DEFAULT_LAYOUT=['kpis','networth','cashflow','budget','radar','subs','loans','goals','credit','projection','accounts'];
 export const title=s=>prettyName(s);
 
 const NAV_PATHS={
