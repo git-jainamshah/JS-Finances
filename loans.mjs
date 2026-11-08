@@ -19,55 +19,68 @@ function near(a,b){
  let i=0,j=0,edits=0;while(i<a.length&&j<b.length){if(a[i]===b[j]){i++;j++;continue;}if(++edits>1)return false;if(a.length>b.length)i++;else if(b.length>a.length)j++;else{i++;j++;}}
  return edits+(a.length-i)+(b.length-j)<=1;
 }
+// Name signal, in priority order: "Name on bank statements" (platform) is the source of truth when given.
+// The loan title and "who lent it" are often just for the owner's reference (e.g. "Mexico trip" via
+// Air Canada, actually financed by Upgrade), so they're only a weak fallback when no platform is set.
+const signal=loan=>{const platform=words(loan.platform);return platform.length?{words:platform,strong:true}:{words:[...new Set([...words(loan.who),...words(loan.name)])],strong:false};};
 function nameScore(loan,name){
- const tx=words(name),platform=words(loan.platform),other=[...words(loan.who),...words(loan.name)].filter(w=>!platform.includes(w));
- const hit=list=>list.filter(w=>tx.some(t=>near(w,t)));
- const p=hit(platform),o=hit(other);
- if(platform.length&&p.length)return {score:1,hits:p};
- if(o.length)return {score:Math.min(.85,.45+.2*o.length),hits:o};
- return {score:0,hits:[]};
+ const sig=signal(loan),tx=words(name),hits=sig.words.filter(w=>tx.some(t=>near(w,t)));
+ if(!hits.length)return {score:0,hits,strong:sig.strong};
+ return {score:sig.strong?1:Math.min(.7,.4+.15*hits.length),hits,strong:sig.strong};
 }
 // Transactions that could be a payment for this loan: money out for loans you owe, money in for loans you're owed.
-const eligible=(loan,t)=>!t.pending&&t.currency==='CAD'&&t.kind!=='credit_payment'&&(loan.dir==='owed'?t.amount<0:t.amount>0);
+const eligible=(loan,t)=>!t.pending&&(!t.currency||t.currency==='CAD')&&t.kind!=='credit_payment'&&(loan.dir==='owed'?t.amount<0:t.amount>0);
+const addMonths=(isoDate,n)=>{const d=new Date(`${isoDate.slice(0,7)}-15T12:00:00`);d.setMonth(d.getMonth()+n);return d.toISOString().slice(0,7);};
 
 export function scorePayment(loan,t){
  const amt=Math.abs(t.amount),pay=+loan.payment||0,n=nameScore(loan,t.name),reasons=[];
- let amount=0;if(pay>0){const r=Math.abs(amt-pay)/pay;amount=r<=.02?1:r<=.1?.75:r<=.25?.35:0;}
+ let amount=0;if(pay>0){const r=Math.abs(amt-pay)/pay;amount=r<=.02?1:r<=.1?.75:r<=.25?.35:r<=.4?.15:0;}
  let day=0;if(pay>0&&loan.day){const g=dayGap(Number(t.date.slice(8)),+loan.day);day=g<=3?1:g<=7?.5:0;}
- if(n.score)reasons.push(`name matches “${n.hits.map(w=>w[0]+w.slice(1).toLowerCase()).join(', ')}”`);
+ if(n.score)reasons.push(`${n.strong?'matches the name on bank statements':'name matches'} “${n.hits.map(w=>w[0]+w.slice(1).toLowerCase()).join(', ')}”`);
  if(amount>=.75)reasons.push(amount===1?'same amount as your payment':'close to your payment amount');
  if(day===1)reasons.push(`around the ${ord(+loan.day)} of the month`);
- return {score:n.score*.5+amount*.35+day*.15,name:n.score,amount,day,reasons};
+ // Priority: name on statements, then the monthly amount, then the day.
+ return {score:n.score*.5+amount*.38+day*.12,name:n.score,strong:n.strong,amount,day,reasons};
 }
 
-// Groups of likely payments (one group per merchant/description), strongest first.
-export function suggestMatches(loan,transactions,{taken=new Set()}={}){
- const linked=new Set(loan.matchKeys||[]),dismissed=new Set(loan.dismissedKeys||[]),groups=new Map();
- for(const t of transactions){
-  if(!eligible(loan,t)||taken.has(t.id))continue;
+// Every plausible group of payments, best first. Transactions are read newest first and the last
+// 12 months decide the ranking; older history only adds weaker "other records" candidates.
+// tier 1 = likely (shown first), tier 2 = other records (shown on "Check other records").
+export function suggestMatches(loan,transactions,{taken=new Set(),today=isoToday()}={}){
+ const linked=new Set(loan.matchKeys||[]),dismissed=new Set(loan.dismissedKeys||[]),groups=new Map(),recentFrom=addMonths(today,-12),staleFrom=addMonths(today,-3);
+ const rows=transactions.filter(t=>eligible(loan,t)&&!taken.has(t.id)).sort((a,b)=>b.date.localeCompare(a.date));
+ for(const t of rows){
   const key=merchantKey(t.name);if(!key||linked.has(key)||dismissed.has(key))continue;
-  const s=scorePayment(loan,t);if(s.score<.3)continue;
-  const g=groups.get(key)||{key,name:t.name,rows:[],scores:[],reasons:new Set()};g.rows.push(t);g.scores.push(s);s.reasons.forEach(r=>g.reasons.add(r));groups.set(key,g);
+  if(loan.matchPlatform&&signal(loan).strong&&nameScore(loan,t.name).score)continue;
+  const s=scorePayment(loan,t);if(s.score<.15)continue;
+  // Different descriptions from the same lender ("UPGRADE INC 8812", "PAD UPGRADE") form one group.
+  const gk=s.strong&&s.name?'platform':key;
+  const g=groups.get(gk)||{id:gk,keys:new Set(),name:t.name,rows:[],scores:[],reasons:new Set()};g.keys.add(key);g.rows.push(t);g.scores.push(s);s.reasons.forEach(r=>g.reasons.add(r));groups.set(gk,g);
  }
  const out=[];
  for(const g of groups.values()){
-  const months=new Set(g.rows.map(r=>r.date.slice(0,7))).size,avg=g.scores.reduce((a,s)=>a+s.score,0)/g.scores.length,named=g.scores.some(s=>s.name>0);
-  const repeat=months>=3?.15:months>=2?.08:0,score=Math.min(1,avg+repeat);
-  // Without a name match, only an exact, repeating amount on the right day counts.
-  if(!named&&!(g.scores.every(s=>s.amount===1&&s.day>=.5)&&months>=3))continue;
-  if(score<.55)continue;
-  if(months>=2)g.reasons.add(`${months} months in a row`);
+  const recent=g.rows.map((r,i)=>[r,g.scores[i]]).filter(([r])=>r.date.slice(0,7)>recentFrom),use=recent.length?recent:g.rows.map((r,i)=>[r,g.scores[i]]);
+  const months=new Set(use.map(([r])=>r.date.slice(0,7))).size,allMonths=new Set(g.rows.map(r=>r.date.slice(0,7))).size;
+  const avg=use.reduce((a,[,s])=>a+s.score,0)/use.length,named=g.scores.some(s=>s.name>0),exact=use.every(([,s])=>s.amount===1&&s.day>=.5);
+  const stale=g.rows[0].date.slice(0,7)<staleFrom;
+  const score=Math.max(0,Math.min(1,avg+(months>=3?.15:months>=2?.08:0)-(stale?.15:0)-(recent.length?0:.1)));
+  let tier=0;
+  if(score>=.55&&(named||(exact&&months>=3)))tier=1;
+  else if(score>=.3&&(named||g.scores.some(s=>s.amount>=.75)))tier=2;
+  if(!tier)continue;
+  const reasons=[...g.reasons];if(months>=2)reasons.push(`${months} of the last 12 months`);if(stale)reasons.push(`last seen ${g.rows[0].date.slice(0,7)}`);
   const amounts=g.rows.map(r=>Math.abs(r.amount)).sort((a,b)=>a-b);
-  out.push({key:g.key,name:g.name,count:g.rows.length,months,total:Math.round(amounts.reduce((a,b)=>a+b,0)*100)/100,typical:amounts[Math.floor(amounts.length/2)],first:g.rows.at(-1).date,last:g.rows[0].date,score,confidence:score>=.75?'High':'Medium',reasons:[...g.reasons],txIds:g.rows.map(r=>r.id)});
+  out.push({key:g.id,keys:[...g.keys],platform:g.id==='platform',name:g.name,count:g.rows.length,months:allMonths,recentMonths:months,total:Math.round(amounts.reduce((a,b)=>a+b,0)*100)/100,typical:amounts[Math.floor(amounts.length/2)],first:g.rows.at(-1).date,last:g.rows[0].date,score,tier,confidence:tier===2?'Low':score>=.75?'High':'Medium',reasons,txIds:g.rows.map(r=>r.id)});
  }
- return out.sort((a,b)=>b.score-a.score).slice(0,3);
+ return out.sort((a,b)=>a.tier-b.tier||b.score-a.score||b.last.localeCompare(a.last));
 }
 
-// Confirmed payments: transactions from linked descriptions (within a sensible amount) minus ones you unlinked.
+// Confirmed payments: transactions from linked descriptions (or, once the lender is linked, any description
+// carrying the name on bank statements) (within a sensible amount) minus ones you unlinked.
 export function linkedPayments(loan,transactions){
- const keys=new Set(loan.matchKeys||[]),rejected=new Set(loan.rejectedTx||[]),pay=+loan.payment||0;
- if(!keys.size)return [];
- return transactions.filter(t=>eligible(loan,t)&&keys.has(merchantKey(t.name))&&!rejected.has(t.id)&&(!pay||Math.abs(Math.abs(t.amount)-pay)/pay<=.5)).map(t=>({id:`tx:${t.id}`,txId:t.id,date:t.date,amount:Math.round(Math.abs(t.amount)*100)/100,source:'bank',name:t.name}));
+ const keys=new Set(loan.matchKeys||[]),rejected=new Set(loan.rejectedTx||[]),pay=+loan.payment||0,byName=loan.matchPlatform&&signal(loan).strong;
+ if(!keys.size&&!byName)return [];
+ return transactions.filter(t=>eligible(loan,t)&&(keys.has(merchantKey(t.name))||(byName&&nameScore(loan,t.name).score>0))&&!rejected.has(t.id)&&(!pay||Math.abs(Math.abs(t.amount)-pay)/pay<=.5)).map(t=>({id:`tx:${t.id}`,txId:t.id,date:t.date,amount:Math.round(Math.abs(t.amount)*100)/100,source:'bank',name:t.name}));
 }
 
 // Current state of a loan or plan: balance after payments since the balance was entered.

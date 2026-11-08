@@ -23,7 +23,7 @@ class App extends Component{
   this.state={booting:true,bootError:'',status:null,data:null,plaid:null,mode:'demo',env:['sandbox','production'].includes(env)?env:'sandbox',busy:'',
    page:L.page||'overview',range:L.range||'12m',custom:L.custom||null,inst:'',edit:false,moreOpen:false,cpMonth:'',
    layout:DEFAULT_LAYOUT,layoutV:LAYOUT_V,saved:[],views:[],density:'comfortable',reduceMotion:false,...blankData('demo'),msgs:[],chatId:null,chatList:[],historyOpen:false,
-   loanFilter:'all',loanForm:null,loanErr:'',extra:{},payFor:'',payAmt:'',input:'',loading:false,quick:'',nwHover:null,budgetMonth:'last',
+   loanFilter:'all',loanForm:null,loanErr:'',matchPage:{},extra:{},payFor:'',payAmt:'',input:'',loading:false,quick:'',nwHover:null,budgetMonth:'last',
    cat:'',merchant:'',calMonth:'',calDay:'',incChg:0,oneOff:0,oneOffMonth:6,cuts:{},cancel:[],goal:10000,cfHover:null,showCustom:false,cStart:'',cEnd:'',
    q:'',tCat:'',tType:'all',sort:{key:'date',dir:'desc'},limit:40,editTx:'',editCat:'',editRule:true,view:'all',
    setTab:'connections',w:window.innerWidth,toast:'',draft:null,leaveTo:null,savedAt:'',plaidEditing:false,plaidMsg:null,pwMsg:'',pwBusy:false};
