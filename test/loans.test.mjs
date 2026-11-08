@@ -68,3 +68,31 @@ test('recent payments rank ahead of an older, stopped pattern',()=>{
  assert.equal(s[0].name,'PAD ABC FIN');assert.equal(s[0].tier,1);
  assert.ok(s.findIndex(x=>x.name==='OLD LENDER')!==0);
 });
+
+test('card-payment labelled lender payments match when the bank-statement name is given',()=>{
+ const l={id:'x',dir:'owe',name:'Mexico Vacation Loan',who:'Air Canada',platform:'Upgrade',balance:1893.02,payment:137.16,day:24,rate:31,balanceAsOf:'2026-01-01'};
+ const data=[1,2,3,4].map(i=>tx('u'+i,`2026-${String(10-i).padStart(2,'0')}-24`,'Upgrade',137.16,{kind:'credit_payment'}));
+ const s=suggestMatches(l,data,{today:'2026-11-08'});
+ assert.equal(s[0].tier,1);assert.equal(s[0].confidence,'High');assert.equal(s[0].count,4);
+});
+test('an example transaction alone is enough to find the rest',()=>{
+ const l={id:'y',dir:'owe',name:'Couch',who:'Store',platform:'',balance:900,payment:0,day:1,balanceAsOf:'2026-01-01',example:{id:'a1',name:'AFFIRM *CANADA',amount:75,date:'2026-10-12'}};
+ const data=[tx('a1','2026-10-12','AFFIRM *CANADA',75),tx('a2','2026-09-12','AFFIRM CA PAYMENT',75),tx('a3','2026-08-13','AFFIRM *CANADA',75,{kind:'transfer'})];
+ const s=suggestMatches(l,data,{today:'2026-11-08'});
+ assert.equal(s[0].count,3);assert.equal(s[0].tier,1);
+});
+test('lines of credit and the debt plan',async()=>{
+ const {locState,debtPlan,simulatePayoff,loanPaymentIds}=await import('../loans.mjs');
+ const acct={id:'loc',name:'ScotiaLine',institution:'Scotiabank',class:'credit_line',balance:8200,limit:10000};
+ const rows=[];for(let i=1;i<=6;i++){const m=`2026-${String(11-i).padStart(2,'0')}`;rows.push(tx('d'+i,`${m}-10`,'TRANSFER',600,{accountId:'loc'}),tx('p'+i,`${m}-20`,'PAYMENT',-400,{accountId:'loc'}),tx('i'+i,`${m}-28`,'INTEREST CHARGES',62,{accountId:'loc'}));}
+ const st=locState(acct,rows,'2026-11-08');
+ assert.equal(st.paid,400);assert.equal(st.drawn,600);assert.equal(st.interest,62);assert.equal(st.net,-262);assert.equal(st.monthsAtPace,null);assert.ok(st.estRate>9&&st.estRate<9.2);
+ const plan={income:5000,outBase:5300,keptBase:-300,groups:[{name:'Dining out',base:600,flexible:true},{name:'Shopping',base:400,flexible:true},{name:'Rent',base:2000,flexible:false}],subs:[]};
+ const p=debtPlan({plan,accounts:[acct,{id:'c',name:'Visa',institution:'RBC',class:'credit_card',balance:2000,limit:5000}],transactions:rows,cash:200,today:'2026-11-08'});
+ assert.equal(p.status,'overspending');assert.equal(p.steps[0].id,'gap');assert.equal(p.steps[0].cuts.reduce((s,c)=>s+c.amount,0),300);
+ assert.ok(p.steps.some(s=>s.id==='loc-loc'));
+ const a=simulatePayoff([{name:'A',balance:1000,rate:20,min:50},{name:'B',balance:1000,rate:5,min:50}],0),b=simulatePayoff([{name:'A',balance:1000,rate:20,min:50},{name:'B',balance:1000,rate:5,min:50}],100);
+ assert.ok(b.months<a.months&&b.interest<a.interest);assert.equal(b.order[0].name,'A');
+ assert.equal(simulatePayoff([{name:'X',balance:10000,rate:30,min:50}],0).months,null);
+ assert.deepEqual([...loanPaymentIds([{id:'z',dir:'owe',platform:'Upgrade',payment:137.16,matchKeys:['UPGRADE']}],[tx('q','2026-10-24','Upgrade',137.16,{kind:'credit_payment'})])],['q']);
+});
