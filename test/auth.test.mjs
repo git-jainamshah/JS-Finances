@@ -22,7 +22,7 @@ test('authentication gate, password change, persistent owner, CSRF, and rate lim
   const post=(path,body,cookie='',origin=base,extra={})=>fetch(base+path,{method:'POST',headers:{'Content-Type':'application/json',origin,cookie,...extra},body:JSON.stringify(body)});
   const cookies=r=>r.headers.getSetCookie().map(v=>v.split(';')[0]).join('; ');
   for(const path of ['/','/app.js','/pages.js','/pages2.js','/ui.js','/importer.js','/insights.mjs','/vendor/preact-htm.mjs','/finance.mjs','/index.html','/web/index.html','/.env','/.data/key'])assert.equal((await get(path)).status,302,path);
-  for(const path of ['/api/data?mode=live','/api/data?mode=demo','/api/status','/api/state'])assert.equal((await get(path)).status,401,path);
+  for(const path of ['/api/data?mode=live','/api/data?mode=demo','/api/status','/api/state','/api/chats?mode=live'])assert.equal((await get(path)).status,401,path);
   assert.equal((await get('/login')).status,200);
   assert.equal((await post('/api/auth/sign-up/email',{email:'other@example.test',password,name:'Other'})).status,404);
   assert.equal((await post('/api/auth/sign-in/email',{email,password},'','https://evil.example')).status,403);

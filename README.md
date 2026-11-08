@@ -38,7 +38,7 @@ The configured local owner account has already been created in this workspace. I
 | `PLAID_REDIRECT_URI` | Optional override for the Production OAuth return URL. Defaults to `APP_URL` with a trailing slash; register that exact HTTPS URI in Plaid. |
 | `PLAID_LINK_CUSTOMIZATION` | Optional Production Link customization name. Defaults to `jainam_finances_prod`. |
 | `ANTHROPIC_API_KEY` | Optional. Enables the Chat page. Without it, Chat shows a setup message and nothing is sent anywhere. |
-| `ANTHROPIC_MODEL` | Optional model override for Chat. Defaults to `claude-opus-5-5`. |
+| `ANTHROPIC_MODEL` | Optional model for Chat. Defaults to `claude-haiku-5-5` (lowest cost, roughly under $0.01 per question). Use `claude-sonnet-5-5` or `claude-opus-5-5` for better answers at higher cost. |
 
 Generate `BETTER_AUTH_SECRET` and `DATA_ENCRYPTION_KEY` independently with a password manager or `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"`. Enter secret values only in your local environment or Vercel's environment settings, never in source files, commit messages or chat.
 
@@ -75,6 +75,8 @@ Pull the latest commit and redeploy with the build command `npm run build`. The 
 The dashboard uses Google Fonts for typography, loads bank logos from Google's website-icon service, and loads Plaid Link when connecting.
 
 **Chat and your data.** When you ask a question on the Chat page, the server sends Anthropic's Claude API a summary of your data (account balances, monthly totals by category, budgets, detected bills, your category rules and the loans you added) plus the transactions returned by searches the model runs. Nothing is sent unless you ask a question and `ANTHROPIC_API_KEY` is set. Transaction descriptions are treated as untrusted data in the prompt. Chat uses Anthropic's server-side refusal fallback (`fallbacks: "default"`), which can retry a declined answer on another Claude model.
+
+**Chat history.** Every conversation is saved automatically to the `chat_conversations` table (created automatically) and listed under History on the Chat page, where you can reopen or delete it. Sample-data and connected-account conversations are kept separately.
 
 **Workspace data.** Loans & IOUs, budgets, category rules, saved views, dashboard layout, pinned answers and chat history are stored as JSON in the `app_state` table of the same database (created automatically). Sample-data mode and connected-accounts mode keep separate copies.
 
