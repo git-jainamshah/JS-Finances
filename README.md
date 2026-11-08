@@ -38,7 +38,7 @@ The configured local owner account has already been created in this workspace. I
 | `PLAID_REDIRECT_URI` | Optional override for the Production OAuth return URL. Defaults to `APP_URL` with a trailing slash; register that exact HTTPS URI in Plaid. |
 | `PLAID_LINK_CUSTOMIZATION` | Optional Production Link customization name. Defaults to `jainam_finances_prod`. |
 | `ANTHROPIC_API_KEY` | Optional. Enables the Chat page. Without it, Chat shows a setup message and nothing is sent anywhere. |
-| `ANTHROPIC_MODEL` | Optional model override for Chat. Defaults to `claude-opus-5-5`. |
+| `ANTHROPIC_MODEL` | Optional model for Chat. Defaults to `claude-haiku-5-5` (lowest cost, roughly under $0.01 per question). Use `claude-sonnet-5-5` or `claude-opus-5-5` for better answers at higher cost. |
 
 Generate `BETTER_AUTH_SECRET` and `DATA_ENCRYPTION_KEY` independently with a password manager or `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"`. Enter secret values only in your local environment or Vercel's environment settings, never in source files, commit messages or chat.
 

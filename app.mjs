@@ -87,7 +87,8 @@ async function readState(keys=[...stateKeys]){await ensureStateTable();const out
 let chatTable;
 const ensureChatTable=()=>chatTable||=getRuntime().query('CREATE TABLE IF NOT EXISTS chat_conversations (id TEXT PRIMARY KEY, mode TEXT NOT NULL, title TEXT NOT NULL, messages TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)').catch(e=>{chatTable=null;throw e;});
 async function dataFor(mode,environment){return mode==='live'?await liveData(environment):{...demoData(),environment};}
-const chatModel=()=>process.env.ANTHROPIC_MODEL||'claude-opus-5-5';
+// Haiku by default: lowest cost per question. Set ANTHROPIC_MODEL to use a larger model.
+const chatModel=()=>process.env.ANTHROPIC_MODEL||'claude-haiku-5-5';
 let anthropicClient,useFallbacks=true;
 async function askAssistant({mode,environment,messages}){
   if(!process.env.ANTHROPIC_API_KEY)return {status:503,body:{error:'AI_NOT_CONFIGURED',message:'Add ANTHROPIC_API_KEY to the Vercel environment variables and redeploy to enable Chat.'}};
@@ -100,7 +101,8 @@ async function askAssistant({mode,environment,messages}){
   for(let step=0;step<5;step++){
     const request={model:chatModel(),max_tokens:4000,output_config:{effort:'low'},system,tools:[searchTool],messages:convo};
     let response;
-    if(useFallbacks){try{response=await anthropicClient.beta.messages.create({...request,betas:['server-side-fallback-2026-07-01'],fallbacks:'default'});}catch(e){if(e?.status!==400||!/fallback|beta|server-side/i.test(String(e?.message||'')))throw e;console.error('Chat: refusal fallbacks rejected, retrying without them:',String(e.message).slice(0,200));useFallbacks=false;}}
+    // The backup-model option is only accepted for Opus and Sonnet models.
+    if(useFallbacks&&/^claude-(opus|sonnet)/.test(request.model)){try{response=await anthropicClient.beta.messages.create({...request,betas:['server-side-fallback-2026-07-01'],fallbacks:'default'});}catch(e){if(e?.status!==400||!/fallback|beta|server-side/i.test(String(e?.message||'')))throw e;console.error('Chat: refusal fallbacks rejected, retrying without them:',String(e.message).slice(0,200));useFallbacks=false;}}
     if(!response)response=await anthropicClient.messages.create(request);
     if(response.stop_reason==='refusal')return {status:200,body:{text:'{"answer":"I can’t help with that one. Try asking about your spending, bills, savings or a what-if.","followups":[]}'}};
     if(response.stop_reason==='pause_turn'){convo.push({role:'assistant',content:response.content});continue;}
