@@ -30,7 +30,7 @@ export function loanSummary(A,J){
 const updLoan=(A,id,fn)=>A.setState(st=>({loans:st.loans.map(x=>x.id===id?fn(x):x)}));
 const updGoal=(A,id,fn)=>A.setState(st=>({goals:(st.goals||[]).map(x=>x.id===id?fn(x):x)}));
 const typeOf=x=>x.target!=null&&x.balance==null?'goal':x.kind==='someday'?'someday':x.dir==='owed'?'owed':'owe';
-const formFrom=x=>{const t=typeOf(x);return t==='goal'?{type:t,id:x.id,name:x.name,target:String(x.target??''),saved:String(x.saved??''),targetDate:(x.targetDate||'').slice(0,7)}:{type:t,id:x.id,name:x.name||'',who:x.who||'',platform:x.platform||'',balance:String(x.balance??''),original:String(x.original??''),payment:String(x.payment||''),rate:x.rate==null?'':String(x.rate),day:x.day||1,targetDate:(x.targetDate||'').slice(0,7),gentle:!!x.gentle};};
+const formFrom=x=>{const t=typeOf(x);return t==='goal'?{type:t,id:x.id,name:x.name,target:String(x.target??''),saved:String(x.saved??''),targetDate:(x.targetDate||'').slice(0,7)}:{type:t,id:x.id,name:x.name||'',who:x.who||'',platform:x.platform||'',balance:String(x.balance??''),original:String(x.original??''),payment:String(x.payment||''),rate:x.rate==null?'':String(x.rate),day:x.day||1,targetDate:(x.targetDate||'').slice(0,7),gentle:!!x.gentle,rematch:'keep',rematchSet:false};};
 const blankForm=type=>type==='goal'?{type,name:'',target:'',saved:'',targetDate:''}:{type,name:'',who:'',platform:'',balance:'',original:'',payment:'',rate:'',day:1,targetDate:'',gentle:false};
 
 function saveForm(A,e){
@@ -47,13 +47,16 @@ function saveForm(A,e){
  const old=S.loans.find(l=>l.id===v.id),changed=!old||Math.abs((+old.balance||0)-balance)>.004,someday=v.type==='someday';
  const loan={...(old||{}),id:old?.id||'l'+Date.now(),dir:v.type==='owed'?'owed':'owe',kind:someday?'someday':'scheduled',name,who:(v.who.trim()||(v.type==='owed'?'Someone':'Lender')).slice(0,120),platform:(v.platform||'').trim().slice(0,80),
   original:Math.max(balance,+v.original||(old&&!changed?+old.original:0)||balance),balance,balanceAsOf:changed?today:(old.balanceAsOf||today),payment:someday?0:Math.max(0,+v.payment||0),rate:someday?0:(v.rate===''?0:Math.max(0,+v.rate)),day:+v.day||1,targetDate:someday?month:'',gentle:someday&&!!v.gentle,connected:false,payments:old?.payments||[]};
- A.setState(st=>({loans:old?st.loans.map(l=>l.id===old.id?loan:l):[...st.loans,loan],loanForm:null,loanErr:''}));
- A.toast(old?(changed?`Updated ${name}. Balance counted from today.`:`Updated ${name}`):`Added ${name}`);
+ if(old&&v.rematch==='new'){loan.matchKeys=[];loan.matchPlatform=false;loan.dismissedKeys=[];loan.rejectedTx=[];}
+ A.setState(st=>({loans:old?st.loans.map(l=>l.id===old.id?loan:l):[...st.loans,loan],loanForm:null,loanErr:'',matchPage:{...st.matchPage,[loan.id]:0}}));
+ A.toast(old?`Updated ${name}.${changed?' Balance counted from today.':''}${v.rematch==='new'?' Looking for matching payments again.':''}`:`Added ${name}`);
 }
 
 // ---------- form ----------
 function LoanForm({A,S,pad}){
- const fm=S.loanForm,setF=(k,val)=>A.setState(st=>({loanForm:{...st.loanForm,[k]:val}})),editing=!!fm.id,t=fm.type;
+ // Changing what matching uses (name on statements, lender, amount, day) defaults to finding new matches.
+ const MATCH_FIELDS=['platform','who','name','payment','day'];
+ const fm=S.loanForm,setF=(k,val)=>A.setState(st=>({loanForm:{...st.loanForm,[k]:val,...(st.loanForm.id&&!st.loanForm.rematchSet&&MATCH_FIELDS.includes(k)?{rematch:'new'}:{})}})),editing=!!fm.id,t=fm.type;
  const types=[['owe','I’m paying back a loan','Bank, Upgrade, Affirm, student loan, family…'],['owed','I lent money','Someone is paying you back'],['someday','I’ll repay someday','No set payments yet, e.g. help from family'],['goal','Saving for something','Kids, a home, a big opportunity']];
  const dayOpts=[...Array(28)].map((_,i)=>({value:i+1,label:i===0?'1st of the month':ord(i+1)}));
  const opt=txt=>html`<span style="font-weight:400;color:#5a6b63">${txt}</span>`;
@@ -80,13 +83,14 @@ function LoanForm({A,S,pad}){
    :html`
     ${field('What’s it for?',text('name',t==='owed'?'e.g. Concert tickets + trip':'e.g. Personal loan, car loan'))}
     ${field(t==='owed'?'Who borrowed it?':'Who lent it to you?',text('who',t==='owed'?'e.g. Arjun':'e.g. Upgrade, Affirm, OSAP, Mom & Dad'))}
-    ${field(html`Name on bank statements ${opt('optional')}`,text('platform',t==='owed'?'e.g. ARJUN P (e-transfer)':'e.g. UPGRADE INC',80),'Helps find these payments in your transactions.')}
+    ${field(html`Name on bank statements ${opt('recommended')}`,text('platform',t==='owed'?'e.g. ARJUN P (e-transfer)':'e.g. UPGRADE INC',80),'Who actually takes the payment. Used first for matching; the fields above are just for you.')}
     ${field(t==='owed'?'Amount still to come back':'Amount still owed',money('balance'))}
     ${field(html`Original amount ${opt('optional')}`,money('original','Same as above'))}
     ${field(t==='owed'?html`Expected monthly ${opt('optional')}`:'Monthly payment',money('payment'))}
     ${t==='owe'?field(html`Interest rate ${opt('optional')}`,html`<span style="position:relative;display:flex;align-items:center"><input type="number" min="0" step="0.01" inputmode="decimal" value=${fm.rate} onInput=${e=>setF('rate',e.target.value)} placeholder="0" class="fi" style=${inputSt+';padding-right:30px'}/><span aria-hidden="true" style="position:absolute;right:12px;color:#5a6b63">%</span></span>`):null}
     <div style="display:grid;gap:6px"><${Select} value=${fm.day} options=${dayOpts} onChange=${val=>setF('day',val)} label="Payment day" width="100%" minWidth="0"/></div>`}
   </div>
+  ${editing&&t!=='goal'&&old&&!old.connected?html`<fieldset style="border:1px solid #e2e7df;border-radius:12px;padding:12px 14px;margin:0;display:grid;gap:8px"><legend style="font-size:13px;font-weight:600;padding:0 6px">After saving</legend>${[['new','Find new matching transactions','Clears linked and hidden matches and searches again with these details. Payments you recorded yourself stay.'],['keep','Keep current, I just corrected something personal','Linked payments stay as they are.']].map(([id,label,note])=>html`<label style="display:flex;gap:10px;align-items:flex-start;font-size:14px;cursor:pointer"><input type="radio" name="rematch" checked=${fm.rematch===id} onChange=${()=>A.setState(st=>({loanForm:{...st.loanForm,rematch:id,rematchSet:true}}))} style="margin-top:3px;accent-color:#315e4e"/><span><b style="font-weight:600">${label}</b><span style="display:block;font-size:12px;color:#5a6b63">${note}</span></span></label>`)}</fieldset>`:null}
   ${old&&old.balanceAsOf?html`<p style="margin:0;font-size:12px;color:#5a6b63">Balance last entered ${new Date(`${old.balanceAsOf}T12:00:00`).toLocaleDateString('en-CA',{month:'short',day:'numeric',year:'numeric'})}. Payments after that date are subtracted automatically.</p>`:null}
   ${S.loanErr?html`<p role="alert" style="margin:0;font-size:14px;color:#9a3d2a;background:#fbefeb;border:1px solid #efcfc5;border-radius:10px;padding:10px 12px">${S.loanErr}</p>`:null}
   <div style="display:flex;gap:8px;justify-content:flex-end"><button type="button" onClick=${()=>A.setState({loanForm:null,loanErr:''})} style=${btn}>Cancel</button><button type="submit" style=${btnDark}>${editing?'Save changes':t==='goal'?'Add goal':'Add'}</button></div>
@@ -94,18 +98,25 @@ function LoanForm({A,S,pad}){
 }
 
 // ---------- pieces of a card ----------
+const PAGE=3;
 function Matches({A,l,J,taken}){
  if(l.connected)return null;
- const sugg=suggestMatches(l,J.tx,{taken}),linked=linkedPayments(l,J.tx),keys=l.matchKeys||[];
- if(!sugg.length&&!keys.length)return null;
+ const all=suggestMatches(l,J.tx,{taken,today:J.todayIso}),linked=linkedPayments(l,J.tx),isLinked=(l.matchKeys||[]).length||l.matchPlatform;
+ const page=A.state.matchPage[l.id]||0,firstTier=all.filter(s=>s.tier===1).length;
+ // Page 0 shows the likely matches (up to 3); "Check other records" walks through the rest, 3 at a time.
+ const start=page===0?0:Math.min(firstTier,PAGE)+(page-1)*PAGE,shown=page===0?all.filter(s=>s.tier===1).slice(0,PAGE):all.slice(start,start+PAGE),more=page===0?all.length>shown.length:start+PAGE<all.length;
+ const setPage=n=>A.setState(st=>({matchPage:{...st.matchPage,[l.id]:n}}));
+ if(!isLinked&&!all.length&&!(+l.payment>0||l.platform))return null;
  return html`<div style="display:grid;gap:8px">
-  ${keys.length?html`<div style="display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;background:#eef5e8;border-radius:10px;padding:9px 12px;font-size:13px;color:#2f5d3a"><span><b>Tracking payments automatically</b> · ${linked.length} found${linked[0]?`, latest ${A.fmtDate(linked[0].date)}`:''}</span><button onClick=${()=>{updLoan(A,l.id,x=>({...x,matchKeys:[]}));A.toast('Stopped tracking. Recorded payments stay.');}} style="border:0;background:none;color:#2f5d3a;font-size:13px;font-weight:600;cursor:pointer;text-decoration:underline">Stop</button></div>`:null}
-  ${sugg.map(s=>html`<div style="border:1px solid #d6e2ee;background:#f4f8fc;border-radius:12px;padding:12px;display:grid;gap:8px">
-   <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline"><b style="font-size:14px">Looks like your ${l.dir==='owed'?'repayments':'payments'}</b><span style=${`font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px;background:${s.confidence==='High'?'#e6f0dc':'#fbefd9'};color:${s.confidence==='High'?'#2f5d3a':'#7a5520'}`}>${s.confidence} confidence</span></div>
-   <div style="font-size:13px;color:#3d4d45"><b>${title(s.name)}</b> · ${s.count} payment${s.count>1?'s':''} · usually ${A.money(s.typical,2)} · ${A.fmtDate(s.first)} to ${A.fmtDate(s.last)}</div>
-   <div style="font-size:12px;color:#5a6b63">Why: ${s.reasons.join(' · ')}</div>
-   <div style="display:flex;gap:8px;flex-wrap:wrap"><button onClick=${()=>{updLoan(A,l.id,x=>({...x,matchKeys:[...new Set([...(x.matchKeys||[]),s.key])]}));A.toast(`Linked. Future “${title(s.name)}” payments will count automatically.`);}} class="hv-dark" style=${pill+';background:#183c35;color:#fff;border-color:#183c35'}>✓ Yes, link these</button><button onClick=${()=>updLoan(A,l.id,x=>({...x,dismissedKeys:[...new Set([...(x.dismissedKeys||[]),s.key])]}))} class="hv-quiet" style=${pill}>Not this</button></div>
+  ${isLinked?html`<div style="display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;background:#eef5e8;border-radius:10px;padding:9px 12px;font-size:13px;color:#2f5d3a"><span><b>Tracking payments automatically</b> · ${linked.length} found${linked[0]?`, latest ${A.fmtDate(linked[0].date)}`:''}</span><button onClick=${()=>{updLoan(A,l.id,x=>({...x,matchKeys:[],matchPlatform:false}));A.toast('Stopped tracking. Recorded payments stay.');}} style="border:0;background:none;color:#2f5d3a;font-size:13px;font-weight:600;cursor:pointer;text-decoration:underline">Stop</button></div>`:null}
+  ${shown.map(s=>html`<div style=${`border:1px solid ${s.tier===1?'#d6e2ee':'#e2e7df'};background:${s.tier===1?'#f4f8fc':'#fafbf8'};border-radius:12px;padding:12px;display:grid;gap:8px`}>
+   <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline"><b style="font-size:14px">${s.tier===1?`Looks like your ${l.dir==='owed'?'repayments':'payments'}`:'Could this be it?'}</b><span style=${`font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px;background:${s.confidence==='High'?'#e6f0dc':s.confidence==='Medium'?'#fbefd9':'#eef1ea'};color:${s.confidence==='High'?'#2f5d3a':s.confidence==='Medium'?'#7a5520':'#3d4d45'}`}>${s.confidence} confidence</span></div>
+   <div style="font-size:13px;color:#3d4d45"><b>${title(s.name)}</b>${s.keys.length>1?` + ${s.keys.length-1} similar description${s.keys.length>2?'s':''}`:''} · ${s.count} payment${s.count>1?'s':''} · usually ${A.money(s.typical,2)} · ${A.fmtDate(s.first)} to ${A.fmtDate(s.last)}</div>
+   <div style="font-size:12px;color:#5a6b63">Why: ${s.reasons.join(' · ')||'similar amount'}</div>
+   <div style="display:flex;gap:8px;flex-wrap:wrap"><button onClick=${()=>{updLoan(A,l.id,x=>({...x,matchKeys:[...new Set([...(x.matchKeys||[]),...s.keys])],matchPlatform:x.matchPlatform||s.platform}));setPage(0);A.toast(`Linked. Future “${title(s.name)}” payments will count automatically.`);}} class="hv-dark" style=${pill+';background:#183c35;color:#fff;border-color:#183c35'}>✓ Yes, link these</button><button onClick=${()=>updLoan(A,l.id,x=>({...x,dismissedKeys:[...new Set([...(x.dismissedKeys||[]),...s.keys])]}))} class="hv-quiet" style=${pill}>Not this</button></div>
   </div>`)}
+  ${!shown.length&&!isLinked?html`<p style="margin:0;font-size:13px;color:#5a6b63;background:#f7f9f4;border-radius:10px;padding:9px 12px">${page?'No other matching records found.':'No likely payments found in the last 12 months.'} ${l.platform?'':'Adding the “Name on bank statements” (Edit) helps the most.'}</p>`:null}
+  ${more||page?html`<div style="display:flex;gap:8px;flex-wrap:wrap">${more?html`<button onClick=${()=>setPage(page+1)} class="hv-pill" style=${pill}>Check other records</button>`:null}${page?html`<button onClick=${()=>setPage(0)} class="hv-quiet" style=${pill}>Back to best matches</button>`:null}</div>`:null}
  </div>`;
 }
 function History({A,l,st}){
