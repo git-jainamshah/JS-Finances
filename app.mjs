@@ -83,9 +83,12 @@ const stateKeys=new Set(['prefs','data:demo','data:live','chat:demo','chat:live'
 let stateTable;
 const ensureStateTable=()=>stateTable||=getRuntime().query('CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)').catch(e=>{stateTable=null;throw e;});
 async function readState(keys=[...stateKeys]){await ensureStateTable();const out={};for(const row of await getRuntime().query('SELECT key,value,updated_at FROM app_state'))if(keys.includes(row.key)){try{out[row.key]=JSON.parse(row.value);}catch{}}return out;}
+// Saved chat conversations, one row per conversation (mode = demo or live).
+let chatTable;
+const ensureChatTable=()=>chatTable||=getRuntime().query('CREATE TABLE IF NOT EXISTS chat_conversations (id TEXT PRIMARY KEY, mode TEXT NOT NULL, title TEXT NOT NULL, messages TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)').catch(e=>{chatTable=null;throw e;});
 async function dataFor(mode,environment){return mode==='live'?await liveData(environment):{...demoData(),environment};}
 const chatModel=()=>process.env.ANTHROPIC_MODEL||'claude-opus-5-5';
-let anthropicClient;
+let anthropicClient,useFallbacks=true;
 async function askAssistant({mode,environment,messages}){
   if(!process.env.ANTHROPIC_API_KEY)return {status:503,body:{error:'AI_NOT_CONFIGURED',message:'Add ANTHROPIC_API_KEY to the Vercel environment variables and redeploy to enable Chat.'}};
   const {default:Anthropic}=await import('@anthropic-ai/sdk');
@@ -95,7 +98,10 @@ async function askAssistant({mode,environment,messages}){
   const system=chatSystemPrompt(J,{budgets:ws.budgets||{},rules:ws.rules||{},loans:Array.isArray(ws.loans)?ws.loans:[],tracked:ws.tracked||[]});
   const convo=messages.map(m=>({role:m.role,content:m.content}));
   for(let step=0;step<5;step++){
-    const response=await anthropicClient.beta.messages.create({model:chatModel(),max_tokens:4000,output_config:{effort:'low'},betas:['server-side-fallback-2026-07-01'],fallbacks:'default',system,tools:[searchTool],messages:convo});
+    const request={model:chatModel(),max_tokens:4000,output_config:{effort:'low'},system,tools:[searchTool],messages:convo};
+    let response;
+    if(useFallbacks){try{response=await anthropicClient.beta.messages.create({...request,betas:['server-side-fallback-2026-07-01'],fallbacks:'default'});}catch(e){if(e?.status!==400)throw e;console.error('Chat: refusal fallbacks rejected, retrying without them:',String(e.message).slice(0,200));useFallbacks=false;}}
+    if(!response)response=await anthropicClient.messages.create(request);
     if(response.stop_reason==='refusal')return {status:200,body:{text:'{"answer":"I can’t help with that one. Try asking about your spending, bills, savings or a what-if.","followups":[]}'}};
     if(response.stop_reason==='pause_turn'){convo.push({role:'assistant',content:response.content});continue;}
     const toolCalls=response.content.filter(b=>b.type==='tool_use');
@@ -143,6 +149,12 @@ export default async function handler(req,res){
       const environment=readEnvironment(url.searchParams.get('env')||defaultEnv);
       if(url.pathname==='/api/status'){const config=await plaidConfiguration(environment);return send(200,{configured:!!config,connected:!!config?.verifiedAt,environment,csrf,connections:(await items(environment)).length+(await importRows(environment).catch(()=>[])).length,email:session.user.email,ai:!!process.env.ANTHROPIC_API_KEY});}
       if(url.pathname==='/api/state')return send(200,{state:await readState()});
+      if(url.pathname==='/api/chats'){
+        await ensureChatTable();const mode=url.searchParams.get('mode')==='live'?'live':'demo',id=url.searchParams.get('id');
+        if(id){const [row]=await getRuntime().query('SELECT id,title,messages,created_at,updated_at FROM chat_conversations WHERE id=? AND mode=?',[id,mode]);if(!row)return send(404,{error:'Conversation not found'});return send(200,{conversation:{id:row.id,title:row.title,messages:JSON.parse(row.messages),createdAt:row.created_at,updatedAt:row.updated_at}});}
+        const rows=await getRuntime().query('SELECT id,title,messages,created_at,updated_at FROM chat_conversations WHERE mode=? ORDER BY updated_at DESC LIMIT 200',[mode]);
+        return send(200,{conversations:rows.map(r=>({id:r.id,title:r.title,count:JSON.parse(r.messages).filter(m=>m.role==='user').length,createdAt:r.created_at,updatedAt:r.updated_at}))});
+      }
       if(url.pathname==='/api/plaid-config')return send(200,{environments:await configurationSummary()});
       if(url.pathname==='/api/data')return send(200,url.searchParams.get('mode')==='live'?await liveData(environment):{...demoData(),environment});
       const file=staticFiles[url.pathname];if(file){if(url.pathname==='/vendor/preact-htm.mjs')res.setHeader('Cache-Control','private, max-age=86400');return send(200,readFileSync(join(root,'web',file[0])),file[1]);}
@@ -150,7 +162,7 @@ export default async function handler(req,res){
     }
     const supplied=req.headers['x-csrf-token'];
     if(!csrf || typeof supplied!=='string' || supplied.length!==csrf.length || !timingSafeEqual(Buffer.from(supplied),Buffer.from(csrf)))return send(403,{error:'Reload the dashboard to authorize this request'});
-    const maxBody=url.pathname==='/api/import/statement'?4400000:url.pathname==='/api/state'?524288:url.pathname==='/api/chat'?65536:16384;
+    const maxBody=url.pathname==='/api/import/statement'?4400000:url.pathname==='/api/chats/save'?1048576:url.pathname==='/api/state'?524288:url.pathname==='/api/chat'?65536:16384;
     let raw='';
     if(req.body!==undefined)raw=typeof req.body==='string'?req.body:JSON.stringify(req.body);
     else for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>maxBody)return send(413,{error:'Request too large'});}
@@ -181,11 +193,23 @@ export default async function handler(req,res){
       if(typeof body.key!=='string')return send(400,{error:'Missing account'});
       await ensureImportTable();await getRuntime().query('DELETE FROM imported_accounts WHERE id=?',[`${environment}:${body.key}`]);return send(200,{ok:true});
     }
+    if(url.pathname==='/api/chats/save'){
+      const mode=body.mode==='live'?'live':'demo',id=typeof body.id==='string'?body.id:'',messages=Array.isArray(body.messages)?body.messages.slice(-200):null;
+      if(!/^c[a-z0-9]{6,40}$/i.test(id)||!messages)return send(400,{error:'Invalid conversation'});
+      const title=String(body.title||messages.find(m=>m?.role==='user')?.text||'Conversation').replace(/\s+/g,' ').trim().slice(0,120)||'Conversation',now=new Date().toISOString();
+      await ensureChatTable();
+      await getRuntime().query('INSERT INTO chat_conversations(id,mode,title,messages,created_at,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,messages=excluded.messages,updated_at=excluded.updated_at',[id,mode,title,JSON.stringify(messages),now,now]);
+      return send(200,{ok:true,updatedAt:now});
+    }
+    if(url.pathname==='/api/chats/delete'){
+      if(typeof body.id!=='string')return send(400,{error:'Missing conversation'});
+      await ensureChatTable();await getRuntime().query('DELETE FROM chat_conversations WHERE id=?',[body.id]);return send(200,{ok:true});
+    }
     if(url.pathname==='/api/chat'){
       const mode=body.mode==='live'?'live':'demo',messages=Array.isArray(body.messages)?body.messages.slice(-12):[];
       if(!messages.length||messages.some(m=>!['user','assistant'].includes(m?.role)||typeof m.content!=='string'||!m.content.trim()||m.content.length>6000)||messages[0].role!=='user'||messages.at(-1).role!=='user')return send(400,{error:'Invalid chat request'});
       try{const result=await askAssistant({mode,environment,messages});return send(result.status,result.body);}
-      catch(e){return send(502,{error:'AI_REQUEST_FAILED',message:e?.status===429?'The assistant is busy right now. Try again in a minute.':e?.status===401?'The ANTHROPIC_API_KEY was rejected. Check it in Vercel.':'The assistant could not answer right now. Try again shortly.'});}
+      catch(e){console.error('Chat request failed:',e?.status||'',e?.name||'',String(e?.message||'').slice(0,300));return send(502,{error:'AI_REQUEST_FAILED',message:e?.status===429?'The assistant is busy right now. Try again in a minute.':e?.status===401?'The ANTHROPIC_API_KEY was rejected. Check it in Vercel.':'The assistant could not answer right now. Try again shortly.'});}
     }
     if(url.pathname==='/api/plaid-config'){
       const clientId=typeof body.clientId==='string'?body.clientId.trim():'';

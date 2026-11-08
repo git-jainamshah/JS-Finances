@@ -123,13 +123,20 @@ export function Transactions({A,S,J,rows,all,pad,rowPad}){
 }
 
 // ===================== CHAT =====================
+function History({A,S}){
+ const list=S.chatList||[],rel=d=>{const t=new Date(d),days=Math.floor((Date.now()-t)/864e5);return days<1?t.toLocaleTimeString('en-CA',{hour:'numeric',minute:'2-digit'}):days<7?t.toLocaleDateString('en-CA',{weekday:'short'}):t.toLocaleDateString('en-CA',{month:'short',day:'numeric'});};
+ return html`<section aria-label="Chat history" style="background:#fff;border:1px solid #e2e7df;border-radius:14px;padding:14px;display:grid;gap:8px">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b style="font:600 14px 'Geist',sans-serif">History</b><button onClick=${()=>A.newChat()} disabled=${S.loading} style="border:1px solid #cdd6ca;background:#fff;border-radius:8px;padding:5px 10px;font-size:13px;font-weight:600;color:#183c35;cursor:pointer">＋ New chat</button></div>
+  ${list.length?html`<ul style="list-style:none;margin:0;padding:0;display:grid;gap:2px;max-height:360px;overflow:auto">${list.map(c=>{const a=c.id===S.chatId;return html`<li key=${c.id} style=${`display:flex;align-items:center;gap:4px;border-radius:9px;background:${a?'#eff4e9':'transparent'}`}><button onClick=${()=>A.openChat(c.id)} aria-current=${a?'true':undefined} class="hv-soft" style="flex:1;min-width:0;text-align:left;border:0;background:transparent;border-radius:9px;padding:8px 10px;cursor:pointer;display:grid;gap:1px"><span style=${`font-size:13px;font-weight:${a?700:600};color:#183c35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis`}>${c.title}</span><span style="font-size:12px;color:#5a6b63">${rel(c.updatedAt)} · ${c.count} question${c.count===1?'':'s'}</span></button><button onClick=${()=>A.deleteChat(c)} aria-label=${`Delete conversation ${c.title}`} title="Delete" class="hv-danger" style="flex:none;width:30px;height:30px;border:0;background:transparent;border-radius:8px;color:#9a3d2a;cursor:pointer">✕</button></li>`;})}</ul>`:html`<p style="margin:0;font-size:13px;color:#5a6b63">Your conversations are saved here automatically.</p>`}
+ </section>`;
+}
 export function Chat({A,S,J,all,pad,gap,mobile}){
  const byId=Object.fromEntries(all.map(t=>[String(t.id),t])),lastMonth=mLong(mk(new Date(J.TODAY.getFullYear(),J.TODAY.getMonth()-1,1))),insts=[...new Set(J.accounts.map(a=>a.institution))],months=J.months(J.firstDate,J.todayIso).length;
  const instText=insts.length?insts.length===1?insts[0]:`${insts.slice(0,-1).join(', ')} and ${insts.at(-1)}`:'your accounts';
  const starters=[['Spending','Where did my money go last month?'],['Bills','Which subscriptions went up in price, and what do they cost me per year?'],['What-if','What if I cut dining out by 30%?'],['Trends','How has my savings rate changed over the last 12 months?']];
  const send=e=>{e?.preventDefault();A.ask(S.input);};
  const aiOff=S.status&&S.status.ai===false;
- return html`<div style=${`display:grid;grid-template-columns:${mobile?'minmax(0,1fr)':'minmax(0,1fr) 300px'};gap:${gap};align-items:start`}>
+ return html`${mobile?html`<div style="display:flex;gap:8px;justify-content:space-between;align-items:center"><button onClick=${()=>A.setState({historyOpen:!S.historyOpen})} aria-expanded=${!!S.historyOpen} style=${btn}>${S.historyOpen?'Hide history':`History${S.chatList.length?` (${S.chatList.length})`:''}`}</button>${S.msgs.length?html`<button onClick=${()=>A.newChat()} style=${btnDark}>＋ New chat</button>`:null}</div>${S.historyOpen?History({A,S}):null}`:null}<div style=${`display:grid;grid-template-columns:${mobile?'minmax(0,1fr)':'minmax(0,1fr) 300px'};gap:${gap};align-items:start`}>
   <section aria-label="Conversation" style=${`background:#fff;border:1px solid #e2e7df;border-radius:16px;display:flex;flex-direction:column;min-height:${mobile?'calc(100vh - 230px)':'calc(100vh - 190px)'};min-width:0`}>
    <div role="log" aria-live="polite" aria-busy=${S.loading} style=${`flex:1;padding:${pad};display:flex;flex-direction:column;gap:22px`}>
     ${!S.msgs.length&&!S.loading?html`<div style="display:grid;gap:18px;padding:20px 0 8px;max-width:640px">
@@ -163,8 +170,8 @@ export function Chat({A,S,J,all,pad,gap,mobile}){
   ${!mobile?html`<aside aria-label="Chat tools" style="display:grid;gap:14px;position:sticky;top:20px">
    <div style="background:#183c35;color:#fff;border-radius:14px;padding:18px;display:grid;gap:10px"><div style="font:600 16px 'Geist',sans-serif">Monthly recap</div><p style="margin:0;font-size:13px;color:#cfe0c9;line-height:1.5">A summary of last month: income, spending, what changed and what to watch.</p><button onClick=${()=>A.ask(`Give me my ${lastMonth} monthly recap: income, spending and savings rate versus the month before, the biggest categories, notable transactions, budget overruns and any subscription changes. Include a chart.`)} class="rb" style="--f:#d1e5a7;--r:#d1e5a7;justify-self:start;color:#183c35;border-radius:10px;padding:8px 14px;font-weight:700;font-size:13px;cursor:pointer">Get ${lastMonth.split(' ')[0]} recap</button></div>
    <div style="background:#fff;border:1px solid #e2e7df;border-radius:14px;padding:18px;display:grid;gap:10px"><div style="font:600 14px 'Geist',sans-serif">What the assistant can see</div><ul style="margin:0;padding:0 0 0 18px;display:grid;gap:4px;font-size:13px;color:#3d4d45"><li>${J.accounts.length} account${J.accounts.length===1?'':'s'}, read-only</li><li>${J.tx.length.toLocaleString()} transactions, ${new Date(`${J.firstDate}T12:00:00`).toLocaleDateString('en-CA',{month:'short',year:'numeric'})} to today</li><li>Budgets, bills and subscriptions</li><li>Your category rules and loans</li></ul><p style="margin:0;font-size:12px;color:#5a6b63;line-height:1.5">A summary of this data is sent to Anthropic’s Claude model only when you ask a question. Answers are observations, not financial advice.</p></div>
-   ${S.msgs.length?html`<button onClick=${()=>A.setState({msgs:[]})} style=${btn}>New conversation</button>`:null}
-  </aside>`:S.msgs.length?html`<button onClick=${()=>A.setState({msgs:[]})} style=${btn}>New conversation</button>`:null}
+   ${History({A,S})}
+  </aside>`:null}
  </div>`;
 }
 

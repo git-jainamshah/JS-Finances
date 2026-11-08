@@ -8,6 +8,7 @@ export const PAGES=[['overview','Overview','Home'],['spending','Spending','Spend
 const PREF_KEYS=['layout','saved','views','density','reduceMotion'],DATA_KEYS=['budgets','rules','overrides','loans','dismissed','tracked'];
 const LOCAL='jsf-ui-v2',ENV_KEY='finance-plaid-environment';
 const readLocal=()=>{try{return JSON.parse(localStorage.getItem(LOCAL)||'{}');}catch{return {};}};
+const newChatId=()=>'c'+Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 const blankData=mode=>({budgets:{},rules:{},overrides:{},loans:mode==='demo'?SAMPLE_LOANS:[],dismissed:[],tracked:[]});
 
 class App extends Component{
@@ -15,7 +16,7 @@ class App extends Component{
   super();const L=readLocal(),env=localStorage.getItem(ENV_KEY);
   this.state={booting:true,bootError:'',status:null,data:null,plaid:null,mode:'demo',env:['sandbox','production'].includes(env)?env:'sandbox',busy:'',
    page:L.page||'overview',range:L.range||'12m',custom:L.custom||null,inst:'',edit:false,moreOpen:false,cpMonth:'',
-   layout:DEFAULT_LAYOUT,saved:[],views:[],density:'comfortable',reduceMotion:false,...blankData('demo'),msgs:[],
+   layout:DEFAULT_LAYOUT,saved:[],views:[],density:'comfortable',reduceMotion:false,...blankData('demo'),msgs:[],chatId:null,chatList:[],historyOpen:false,
    loanFilter:'all',loanForm:null,loanErr:'',extra:{},payFor:'',payAmt:'',input:'',loading:false,quick:'',nwHover:null,budgetMonth:'last',
    cat:'',merchant:'',calMonth:'',calDay:'',incChg:0,oneOff:0,oneOffMonth:6,cuts:{},cancel:[],goal:10000,cfHover:null,showCustom:false,cStart:'',cEnd:'',
    q:'',tCat:'',tType:'all',sort:{key:'date',dir:'desc'},limit:40,editTx:'',editCat:'',editRule:true,view:'all',
@@ -43,19 +44,20 @@ class App extends Component{
    const [stateRes,plaid]=await Promise.all([this.api('/api/state').catch(()=>({state:{},failed:true})),this.api('/api/plaid-config').catch(()=>null)]);
    this.store=stateRes.state||{};this.stateFailed=!!stateRes.failed;
    const mode=status.connections?'live':'demo';
-   this.setState({status,plaid,mode,...this.groupFrom('prefs'),...this.groupFrom(`data:${mode}`,mode),msgs:this.store[`chat:${mode}`]?.msgs||[]});
-   for(const k of ['prefs',`data:${mode}`,`chat:${mode}`])this.lastSaved[k]=JSON.stringify(this.groupValue(k,mode));
+   this.setState({status,plaid,mode,...this.groupFrom('prefs'),...this.groupFrom(`data:${mode}`,mode)});
+   for(const k of ['prefs',`data:${mode}`])this.lastSaved[k]=JSON.stringify(this.groupValue(k,mode));
    await this.loadData(mode);
+   this.loadChats(mode,true);
    if(oauth)await this.connect(undefined,true);
   }catch(e){this.setState({booting:false,bootError:e.message});}
  }
  componentWillUnmount(){window.removeEventListener('resize',this.onResize);window.removeEventListener('pagehide',this.onUnload);}
  groupFrom(key,mode){const v=this.store[key]||{};if(key==='prefs')return {layout:Array.isArray(v.layout)?v.layout:DEFAULT_LAYOUT,saved:v.saved||[],views:v.views||[],density:v.density||'comfortable',reduceMotion:!!v.reduceMotion};const b=blankData(mode);return Object.fromEntries(DATA_KEYS.map(k=>[k,v[k]??b[k]]));}
- groupValue(key,mode=this.state.mode,S=this.state){if(key==='prefs')return Object.fromEntries(PREF_KEYS.map(k=>[k,S[k]]));if(key.startsWith('data:'))return Object.fromEntries(DATA_KEYS.map(k=>[k,S[k]]));return {msgs:S.msgs.slice(-30)};}
+ groupValue(key,mode=this.state.mode,S=this.state){if(key==='prefs')return Object.fromEntries(PREF_KEYS.map(k=>[k,S[k]]));if(key.startsWith('data:'))return Object.fromEntries(DATA_KEYS.map(k=>[k,S[k]]));}
  componentDidUpdate(){
   const S=this.state;if(S.booting)return;
   try{localStorage.setItem(LOCAL,JSON.stringify({page:S.page,range:S.range,custom:S.custom}));}catch{}
-  for(const key of ['prefs',`data:${S.mode}`,`chat:${S.mode}`]){const v=JSON.stringify(this.groupValue(key));if(v!==this.lastSaved[key]){this.lastSaved[key]=v;this.store[key]=JSON.parse(v);clearTimeout(this.timers[key]);this.timers[key]=setTimeout(()=>this.save(key,v),700);}}
+  for(const key of ['prefs',`data:${S.mode}`]){const v=JSON.stringify(this.groupValue(key));if(v!==this.lastSaved[key]){this.lastSaved[key]=v;this.store[key]=JSON.parse(v);clearTimeout(this.timers[key]);this.timers[key]=setTimeout(()=>this.save(key,v),700);}}
  }
  async save(key,v){delete this.timers[key];try{await this.api('/api/state',{key,value:JSON.parse(v)});}catch(e){this.toast('Couldn’t save your changes. Check your connection.');}}
  flushSaves(){for(const key of Object.keys(this.timers)){clearTimeout(this.timers[key]);const v=this.lastSaved[key];try{fetch('/api/state',{method:'POST',keepalive:true,headers:{'Content-Type':'application/json','X-CSRF-Token':this.state.status?.csrf||''},body:JSON.stringify({environment:this.state.env,key,value:JSON.parse(v)})});}catch{}}this.timers={};}
@@ -67,10 +69,10 @@ class App extends Component{
  }
  async switchMode(mode){
   if(mode===this.state.mode)return;this.flushSaves();
-  this.setState({...this.groupFrom(`data:${mode}`,mode),msgs:this.store[`chat:${mode}`]?.msgs||[],mode});
+  this.setState({...this.groupFrom(`data:${mode}`,mode),msgs:[],chatId:null,chatList:[],mode});
   this.lastSaved[`data:${mode}`]=JSON.stringify(this.groupValue(`data:${mode}`,mode,{...this.state,...this.groupFrom(`data:${mode}`,mode)}));
-  this.lastSaved[`chat:${mode}`]=JSON.stringify({msgs:(this.store[`chat:${mode}`]?.msgs||[]).slice(-30)});
   await this.loadData(mode);
+  this.loadChats(mode,false);
  }
  async setEnvironment(env){
   if(env===this.state.env)return;localStorage.setItem(ENV_KEY,env);
@@ -135,12 +137,43 @@ class App extends Component{
  allLoans(J){return [...this.connectedLoans(J),...this.state.loans];}
  async ask(text){
   text=String(text||'').trim();if(!text||this.state.loading)return;
-  const msgs=[...this.state.msgs,{role:'user',text,id:Date.now()}];
-  this.setState({msgs,input:'',quick:'',loading:true,page:'chat'});window.scrollTo({top:0});
+  const msgs=[...this.state.msgs,{role:'user',text,id:Date.now()}],chatId=this.state.chatId||newChatId();
+  this.setState({msgs,chatId,input:'',quick:'',loading:true,page:'chat'});window.scrollTo({top:0});
   const history=msgs.slice(-8).map(m=>({role:m.role,content:m.role==='user'?m.text:(m.answer||'…')}));
   while(history.length&&history[0].role!=='user')history.shift();
   try{const r=await this.api('/api/chat',{mode:this.state.mode,messages:history});const p=this.parse(r.text);this.setState(s=>({loading:false,msgs:[...s.msgs,{role:'assistant',id:Date.now(),q:text,...p}]}));}
   catch(e){this.setState(s=>({loading:false,msgs:[...s.msgs,{role:'assistant',id:Date.now(),q:text,error:true,answer:e.code==='AI_NOT_CONFIGURED'?e.message:`I couldn’t reach the assistant just now. ${e.message||''}`.trim(),followups:e.code==='AI_NOT_CONFIGURED'?[]:[text]}]}));}
+  if(this.state.chatId===chatId)this.saveChat();
+ }
+ // ---------- chat history ----------
+ async loadChats(mode=this.state.mode,openLatest=false){
+  try{
+   const {conversations}=await this.api(`/api/chats?mode=${mode}`);
+   let list=conversations;
+   // One-time move of the single saved chat from the earlier version into history.
+   const legacy=this.store[`chat:${mode}`]?.msgs;
+   if(legacy?.length&&!list.length){const id=newChatId();await this.api('/api/chats/save',{mode,id,messages:legacy});await this.api('/api/state',{key:`chat:${mode}`,value:{msgs:[],migrated:true}});this.store[`chat:${mode}`]={msgs:[]};list=(await this.api(`/api/chats?mode=${mode}`)).conversations;}
+   if(this.state.mode!==mode)return;
+   this.setState({chatList:list});
+   if(openLatest&&list[0]&&!this.state.msgs.length)await this.openChat(list[0].id);
+  }catch(e){console.warn('Chat history unavailable',e);}
+ }
+ async saveChat(){
+  const {chatId:id,msgs,mode}=this.state;if(!id||!msgs.length)return;
+  try{const r=await this.api('/api/chats/save',{mode,id,messages:msgs});const title=String(msgs.find(m=>m.role==='user')?.text||'Conversation').replace(/\s+/g,' ').trim().slice(0,120);
+   this.setState(s=>({chatList:[{id,title,count:msgs.filter(m=>m.role==='user').length,updatedAt:r.updatedAt,createdAt:s.chatList.find(c=>c.id===id)?.createdAt||r.updatedAt},...s.chatList.filter(c=>c.id!==id)]}));}
+  catch(e){this.toast('Couldn’t save this conversation. Check your connection.');}
+ }
+ async openChat(id){
+  if(this.state.loading||id===this.state.chatId)return this.setState({historyOpen:false});
+  try{const {conversation}=await this.api(`/api/chats?mode=${this.state.mode}&id=${encodeURIComponent(id)}`);this.setState({chatId:id,msgs:conversation.messages,historyOpen:false,input:''});}
+  catch(e){this.toast(e.message);}
+ }
+ newChat(){if(this.state.loading)return;this.setState({chatId:null,msgs:[],input:'',historyOpen:false});}
+ async deleteChat(c){
+  if(!confirm(`Delete “${c.title}”? This can’t be undone.`))return;
+  try{await this.api('/api/chats/delete',{id:c.id});this.setState(s=>({chatList:s.chatList.filter(x=>x.id!==c.id),...(s.chatId===c.id?{chatId:null,msgs:[]}:{})}));this.toast('Conversation deleted');}
+  catch(e){this.toast(e.message);}
  }
  parse(raw){const t=String(raw||''),a=t.indexOf('{'),b=t.lastIndexOf('}');try{const o=JSON.parse(t.slice(a,b+1));const pts=o.chart&&Array.isArray(o.chart.points)?o.chart.points.filter(p=>p&&isFinite(Number(p.value))).slice(0,24):[];return {answer:String(o.answer||''),chart:pts.length>1?{type:o.chart.type==='line'?'line':'bar',title:String(o.chart.title||''),points:pts.map(p=>({label:String(p.label),value:Number(p.value)}))}:null,citations:Array.isArray(o.citations)?o.citations.slice(0,6).map(String):[],scenario:o.scenario&&isFinite(Number(o.scenario.monthlyChange))?{title:String(o.scenario.title||'Scenario'),monthlyChange:Number(o.scenario.monthlyChange)}:null,followups:Array.isArray(o.followups)?o.followups.slice(0,3).map(String):[]};}catch{return {answer:t.replace(/```json|```/g,'').trim(),followups:[]};}}
  saveMsg(m){const id='ai'+m.id;if(this.state.saved.some(s=>s.id===id))return;const l=[...this.state.layout],k=l.indexOf('kpis');l.splice(k+1,0,'ai:'+id);this.setState({saved:[...this.state.saved,{id,title:m.q||'Saved answer',answer:m.answer,chart:m.chart,when:new Date().toLocaleDateString('en-CA',{month:'short',day:'numeric'})}],layout:l});this.toast('Saved to Overview');}

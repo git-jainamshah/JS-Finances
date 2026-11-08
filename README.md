@@ -76,6 +76,8 @@ The dashboard uses Google Fonts for typography, loads bank logos from Google's w
 
 **Chat and your data.** When you ask a question on the Chat page, the server sends Anthropic's Claude API a summary of your data (account balances, monthly totals by category, budgets, detected bills, your category rules and the loans you added) plus the transactions returned by searches the model runs. Nothing is sent unless you ask a question and `ANTHROPIC_API_KEY` is set. Transaction descriptions are treated as untrusted data in the prompt. Chat uses Anthropic's server-side refusal fallback (`fallbacks: "default"`), which can retry a declined answer on another Claude model.
 
+**Chat history.** Every conversation is saved automatically to the `chat_conversations` table (created automatically) and listed under History on the Chat page, where you can reopen or delete it. Sample-data and connected-account conversations are kept separately.
+
 **Workspace data.** Loans & IOUs, budgets, category rules, saved views, dashboard layout, pinned answers and chat history are stored as JSON in the `app_state` table of the same database (created automatically). Sample-data mode and connected-accounts mode keep separate copies.
 
 ## Plaid setup
