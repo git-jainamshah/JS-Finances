@@ -100,7 +100,7 @@ async function askAssistant({mode,environment,messages}){
   for(let step=0;step<5;step++){
     const request={model:chatModel(),max_tokens:4000,output_config:{effort:'low'},system,tools:[searchTool],messages:convo};
     let response;
-    if(useFallbacks){try{response=await anthropicClient.beta.messages.create({...request,betas:['server-side-fallback-2026-07-01'],fallbacks:'default'});}catch(e){if(e?.status!==400)throw e;console.error('Chat: refusal fallbacks rejected, retrying without them:',String(e.message).slice(0,200));useFallbacks=false;}}
+    if(useFallbacks){try{response=await anthropicClient.beta.messages.create({...request,betas:['server-side-fallback-2026-07-01'],fallbacks:'default'});}catch(e){if(e?.status!==400||!/fallback|beta|server-side/i.test(String(e?.message||'')))throw e;console.error('Chat: refusal fallbacks rejected, retrying without them:',String(e.message).slice(0,200));useFallbacks=false;}}
     if(!response)response=await anthropicClient.messages.create(request);
     if(response.stop_reason==='refusal')return {status:200,body:{text:'{"answer":"I can’t help with that one. Try asking about your spending, bills, savings or a what-if.","followups":[]}'}};
     if(response.stop_reason==='pause_turn'){convo.push({role:'assistant',content:response.content});continue;}
@@ -209,7 +209,7 @@ export default async function handler(req,res){
       const mode=body.mode==='live'?'live':'demo',messages=Array.isArray(body.messages)?body.messages.slice(-12):[];
       if(!messages.length||messages.some(m=>!['user','assistant'].includes(m?.role)||typeof m.content!=='string'||!m.content.trim()||m.content.length>6000)||messages[0].role!=='user'||messages.at(-1).role!=='user')return send(400,{error:'Invalid chat request'});
       try{const result=await askAssistant({mode,environment,messages});return send(result.status,result.body);}
-      catch(e){console.error('Chat request failed:',e?.status||'',e?.name||'',String(e?.message||'').slice(0,300));return send(502,{error:'AI_REQUEST_FAILED',message:e?.status===429?'The assistant is busy right now. Try again in a minute.':e?.status===401?'The ANTHROPIC_API_KEY was rejected. Check it in Vercel.':'The assistant could not answer right now. Try again shortly.'});}
+      catch(e){console.error('Chat request failed:',e?.status||'',e?.name||'',String(e?.message||'').slice(0,300));const detail=String(e?.message||'');return send(502,{error:'AI_REQUEST_FAILED',message:/credit balance/i.test(detail)?'Your Anthropic API account is out of credits. Add credits at console.anthropic.com → Settings → Billing, then try again.':e?.status===429?'The assistant is busy right now. Try again in a minute.':e?.status===401?'The ANTHROPIC_API_KEY was rejected. Check it in Vercel.':'The assistant could not answer right now. Try again shortly.'});}
     }
     if(url.pathname==='/api/plaid-config'){
       const clientId=typeof body.clientId==='string'?body.clientId.trim():'';

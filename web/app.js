@@ -142,7 +142,7 @@ class App extends Component{
   const history=msgs.slice(-8).map(m=>({role:m.role,content:m.role==='user'?m.text:(m.answer||'…')}));
   while(history.length&&history[0].role!=='user')history.shift();
   try{const r=await this.api('/api/chat',{mode:this.state.mode,messages:history});const p=this.parse(r.text);this.setState(s=>({loading:false,msgs:[...s.msgs,{role:'assistant',id:Date.now(),q:text,...p}]}));}
-  catch(e){this.setState(s=>({loading:false,msgs:[...s.msgs,{role:'assistant',id:Date.now(),q:text,error:true,answer:e.code==='AI_NOT_CONFIGURED'?e.message:`I couldn’t reach the assistant just now. ${e.message||''}`.trim(),followups:e.code==='AI_NOT_CONFIGURED'?[]:[text]}]}));}
+  catch(e){this.setState(s=>({loading:false,msgs:[...s.msgs,{role:'assistant',id:Date.now(),q:text,error:true,answer:e.code==='AI_NOT_CONFIGURED'||/credits/i.test(e.message||'')?e.message:`I couldn’t reach the assistant just now. ${e.message||''}`.trim(),followups:e.code==='AI_NOT_CONFIGURED'||/credits/i.test(e.message||'')?[]:[text]}]}));}
   if(this.state.chatId===chatId)this.saveChat();
  }
  // ---------- chat history ----------
