@@ -50,7 +50,7 @@ Production requests fail closed with HTTP 503 without an HTTPS APP_URL, authenti
 
 ### Testing branches before merging (one-time setup)
 
-Every branch pushed to GitHub gets a Vercel preview at `https://js-finances-git-<branch>-<team>.vercel.app`. Previews work out their own address, so they never need `APP_URL`. Set this up once:
+Every branch pushed to GitHub gets a Vercel preview at `https://js-finances-git-<branch>-<team>.vercel.app` (Vercel shortens long branch names, so use the **Preview** link in the Vercel bot's comment on the pull request). Previews work out their own address, so they never need `APP_URL`. Set this up once:
 
 1. **Database:** install the **Neon** integration (Vercel → Integrations, or Storage → your Neon database) and turn on *Create a database branch for preview deployments*. Each preview then gets its own copy of the production database, and `DATABASE_URL` is filled in automatically. Previews never write to production data.
 2. **Variables:** in Project Settings → Environment Variables, add these once with environment **Preview** and *all branches*: `OWNER_EMAIL` and `DATA_ENCRYPTION_KEY` (same values as Production, so the copied data and Plaid connections still decrypt), `BETTER_AUTH_SECRET` (a different random value from Production), and optionally `ANTHROPIC_API_KEY`.
