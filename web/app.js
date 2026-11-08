@@ -95,6 +95,24 @@ class App extends Component{
     onExit:error=>{if(error)this.toast(error.display_message||error.error_code);handler.destroy();}});
    handler.open();}catch(e){this.toast(e.message);}finally{this.setState({busy:''});}
  }
+ async importStatements(fileList){
+  if(!fileList?.length||this.state.importing?.running)return;
+  let files;try{const {collectStatements}=await import('/importer.js');files=await collectStatements([...fileList]);}catch(e){this.toast(e.message||'Could not read those files.');return;}
+  if(!files.length){this.toast('No PDF statements found in those files.');return;}
+  const {toBase64}=await import('/importer.js');
+  this.setState({importing:{running:true,total:files.length,done:0,results:[],added:0}});
+  let added=0;
+  for(const f of files){
+   let r;try{const d=await this.api('/api/import/statement',{filename:f.name,data:toBase64(f.bytes)});added+=d.added||0;r={name:f.name,ok:true};}catch(e){r={name:f.name,ok:false,message:e.message};}
+   this.setState(st=>({importing:{...st.importing,done:st.importing.done+1,results:[...st.importing.results,r],added}}));
+  }
+  this.setState(st=>({importing:{...st.importing,running:false}}));
+  try{const status=await this.api(this.envPath('/api/status'));this.setState({status});if(this.state.mode!=='live')await this.switchMode('live');else await this.loadData('live');}catch(e){this.toast(e.message);}
+ }
+ async removeImport(c){
+  if(!confirm(`Remove all imported ${c.institution} ${c.accountName} data? You can import the statements again later.`))return;
+  try{await this.api('/api/import/remove',{key:c.key});this.toast('Imported data removed');await this.loadData();}catch(e){this.toast(e.message);}
+ }
  async signOut(){try{await this.api('/api/auth/sign-out',{});}catch{}location.replace('/login');}
  // ---------- helpers used by pages ----------
  committedSettings(){const S=this.state;return {budgets:S.budgets,density:S.density||'comfortable',reduceMotion:S.reduceMotion,rules:S.rules,env:S.env};}

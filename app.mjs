@@ -6,6 +6,7 @@ import {getRuntime,root} from './lib/runtime.mjs';
 import {ConfigurationError} from './lib/config.mjs';
 import {accountClass,classifyTransactions,demoData,applyChanges} from './finance.mjs';
 import {createEngine,chatSystemPrompt,searchTool} from './insights.mjs';
+import {parseStatement,mergeImport,importToPlaid,learnCategories,StatementError} from './statements.mjs';
 const plaidEnvironments=['sandbox','production'];
 const defaultEnv=process.env.PLAID_ENV || 'sandbox';
 if(!plaidEnvironments.includes(defaultEnv))throw Error('PLAID_ENV must be sandbox or production');
@@ -55,12 +56,28 @@ async function sync(item){
     }catch(e){if(e.message==='TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION' && attempt<2)continue;throw e;}
   }
 }
+// Accounts imported from PDF statements (for banks Plaid can't reach). One JSON record per account.
+let importTable;
+const ensureImportTable=()=>importTable||=getRuntime().query('CREATE TABLE IF NOT EXISTS imported_accounts (id TEXT PRIMARY KEY, env TEXT NOT NULL, record TEXT NOT NULL, updated_at TEXT NOT NULL)').catch(e=>{importTable=null;throw e;});
+const importRows=async environment=>{await ensureImportTable();return getRuntime().query('SELECT id,record,updated_at FROM imported_accounts WHERE env=?',[environment]);};
+const toAccount=(a,institution)=>({id:a.account_id,name:a.name,officialName:a.official_name||'',mask:a.mask,type:a.type,subtype:a.subtype||'',class:accountClass(a),institution,balance:a.balances.current,available:a.balances.available,limit:a.balances.limit,currency:a.balances.iso_currency_code||a.balances.unofficial_currency_code||'Unknown'});
 async function liveData(environment){
-  const rows=await items(environment),accounts=rows.flatMap(i=>JSON.parse(i.accounts).map(a=>({id:a.account_id,name:a.name,officialName:a.official_name||'',mask:a.mask,type:a.type,subtype:a.subtype||'',class:accountClass(a),institution:i.institution,balance:a.balances.current,available:a.balances.available,limit:a.balances.limit,currency:a.balances.iso_currency_code||a.balances.unofficial_currency_code||'Unknown'})));
-  const transactions=rows.flatMap(i=>{const itemAccounts=JSON.parse(i.accounts);return classifyTransactions(JSON.parse(i.transactions),itemAccounts,i.institution);}).sort((a,b)=>b.date.localeCompare(a.date));
-  return {demo:false,environment,accounts,transactions,coverage:{start:transactions.at(-1)?.date||null,end:transactions[0]?.date||null},connections:rows.map(i=>({id:i.id,institution:i.institution,synced:i.synced}))};
+  const rows=await items(environment),accounts=rows.flatMap(i=>JSON.parse(i.accounts).map(a=>toAccount(a,i.institution)));
+  const raw=rows.map(i=>({i,accounts:JSON.parse(i.accounts),transactions:JSON.parse(i.transactions)}));
+  const transactions=raw.flatMap(({i,accounts:itemAccounts,transactions:tx})=>classifyTransactions(tx,itemAccounts,i.institution));
+  const connections=rows.map(i=>({id:i.id,institution:i.institution,synced:i.synced}));
+  let imports=[];try{imports=await importRows(environment);}catch(e){console.error('Imported accounts unavailable',e.message);}
+  if(imports.length){
+    const learned=learnCategories(raw.flatMap(r=>r.transactions));
+    for(const row of imports){const record=JSON.parse(row.record),{account,transactions:tx}=importToPlaid(record,learned),first=record.statements[0],last=record.statements.at(-1);
+      accounts.push({...toAccount(account,record.institution),imported:true,asOf:record.account.asOf});
+      transactions.push(...classifyTransactions(tx,[account],record.institution).map(t=>({...t,imported:true})));
+      connections.push({id:`import:${record.key}`,institution:record.institution,synced:row.updated_at,imported:true,key:record.key,accountName:record.account.name,mask:record.account.mask,statements:record.statements.length,from:first?.start||null,to:last?.end||null,transactions:record.transactions.length});}
+  }
+  transactions.sort((a,b)=>b.date.localeCompare(a.date));
+  return {demo:false,environment,accounts,transactions,coverage:{start:transactions.at(-1)?.date||null,end:transactions[0]?.date||null},connections};
 }
-const staticFiles={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/pages.js':['pages.js','text/javascript'],'/pages2.js':['pages2.js','text/javascript'],'/ui.js':['ui.js','text/javascript'],'/vendor/preact-htm.mjs':['vendor/preact-htm.mjs','text/javascript'],'/style.css':['style.css','text/css'],'/finance.mjs':['../finance.mjs','text/javascript'],'/insights.mjs':['../insights.mjs','text/javascript'],'/login':['login.html','text/html'],'/login.js':['login.js','text/javascript'],'/auth.css':['auth.css','text/css']};
+const staticFiles={'/':['index.html','text/html'],'/app.js':['app.js','text/javascript'],'/pages.js':['pages.js','text/javascript'],'/pages2.js':['pages2.js','text/javascript'],'/ui.js':['ui.js','text/javascript'],'/importer.js':['importer.js','text/javascript'],'/vendor/preact-htm.mjs':['vendor/preact-htm.mjs','text/javascript'],'/style.css':['style.css','text/css'],'/finance.mjs':['../finance.mjs','text/javascript'],'/insights.mjs':['../insights.mjs','text/javascript'],'/login':['login.html','text/html'],'/login.js':['login.js','text/javascript'],'/auth.css':['auth.css','text/css']};
 // Owner-created workspace data (loans, budgets, rules, layout, chat history). One JSON document per key.
 const stateKeys=new Set(['prefs','data:demo','data:live','chat:demo','chat:live']);
 let stateTable;
@@ -124,7 +141,7 @@ export default async function handler(req,res){
     const csrf=session?createHmac('sha256',runtime.secret).update(session.session.token).digest('hex'):null;
     if(req.method==='GET'){
       const environment=readEnvironment(url.searchParams.get('env')||defaultEnv);
-      if(url.pathname==='/api/status'){const config=await plaidConfiguration(environment);return send(200,{configured:!!config,connected:!!config?.verifiedAt,environment,csrf,connections:(await items(environment)).length,email:session.user.email,ai:!!process.env.ANTHROPIC_API_KEY});}
+      if(url.pathname==='/api/status'){const config=await plaidConfiguration(environment);return send(200,{configured:!!config,connected:!!config?.verifiedAt,environment,csrf,connections:(await items(environment)).length+(await importRows(environment).catch(()=>[])).length,email:session.user.email,ai:!!process.env.ANTHROPIC_API_KEY});}
       if(url.pathname==='/api/state')return send(200,{state:await readState()});
       if(url.pathname==='/api/plaid-config')return send(200,{environments:await configurationSummary()});
       if(url.pathname==='/api/data')return send(200,url.searchParams.get('mode')==='live'?await liveData(environment):{...demoData(),environment});
@@ -133,7 +150,7 @@ export default async function handler(req,res){
     }
     const supplied=req.headers['x-csrf-token'];
     if(!csrf || typeof supplied!=='string' || supplied.length!==csrf.length || !timingSafeEqual(Buffer.from(supplied),Buffer.from(csrf)))return send(403,{error:'Reload the dashboard to authorize this request'});
-    const maxBody=url.pathname==='/api/state'?524288:url.pathname==='/api/chat'?65536:16384;
+    const maxBody=url.pathname==='/api/import/statement'?4400000:url.pathname==='/api/state'?524288:url.pathname==='/api/chat'?65536:16384;
     let raw='';
     if(req.body!==undefined)raw=typeof req.body==='string'?req.body:JSON.stringify(req.body);
     else for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>maxBody)return send(413,{error:'Request too large'});}
@@ -145,6 +162,23 @@ export default async function handler(req,res){
       await ensureStateTable();const updatedAt=new Date().toISOString();
       await getRuntime().query('INSERT INTO app_state(key,value,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at',[body.key,JSON.stringify(body.value),updatedAt]);
       return send(200,{ok:true,updatedAt});
+    }
+    if(url.pathname==='/api/import/statement'){
+      if(typeof body.data!=='string'||!body.data)return send(400,{error:'Attach a PDF statement.'});
+      const pdf=Buffer.from(body.data,'base64');
+      if(pdf.length<100||pdf.subarray(0,5).toString()!=='%PDF-')return send(400,{error:'NOT_A_PDF',message:'That file isn’t a PDF.'});
+      let parsed;try{parsed=await parseStatement(pdf);}catch(e){return send(422,{error:e instanceof StatementError?e.code:'STATEMENT_UNREADABLE',message:e instanceof StatementError?e.message:'This PDF could not be read.'});}
+      if(!parsed.transactions.length&&parsed.previous===parsed.total)return send(200,{ok:true,skipped:true,period:parsed.period,message:'No transactions in this statement.'});
+      if(!parsed.reconciled)return send(422,{error:'STATEMENT_DOES_NOT_BALANCE',message:`The transactions read from this statement are off by ${parsed.difference.toFixed(2)} compared with its totals, so it wasn’t saved.`,period:parsed.period});
+      await ensureImportTable();
+      const id=`${environment}:${parsed.account.key}`,[row]=await getRuntime().query('SELECT record FROM imported_accounts WHERE id=?',[id]),before=row?JSON.parse(row.record):null;
+      const record=mergeImport(before,parsed),added=record.transactions.length-(before?.transactions.length||0),updatedAt=new Date().toISOString();
+      await getRuntime().query('INSERT INTO imported_accounts(id,env,record,updated_at) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET record=excluded.record,updated_at=excluded.updated_at',[id,environment,JSON.stringify(record),updatedAt]);
+      return send(200,{ok:true,account:{name:record.account.name,mask:record.account.mask},period:parsed.period,transactions:parsed.transactions.length,added,total:record.transactions.length});
+    }
+    if(url.pathname==='/api/import/remove'){
+      if(typeof body.key!=='string')return send(400,{error:'Missing account'});
+      await ensureImportTable();await getRuntime().query('DELETE FROM imported_accounts WHERE id=?',[`${environment}:${body.key}`]);return send(200,{ok:true});
     }
     if(url.pathname==='/api/chat'){
       const mode=body.mode==='live'?'live':'demo',messages=Array.isArray(body.messages)?body.messages.slice(-12):[];

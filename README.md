@@ -90,13 +90,25 @@ After connecting, use **Sync accounts**. Initial transaction history may take ti
 
 Demo data, sandbox connections and production connections stay separate. Local connected data is not automatically migrated into the hosted database: reconnect banks in the hosted app, or arrange a deliberate migration that preserves the encryption key. Disconnect/revocation currently uses Plaid/bank consent controls; deleting local data does not revoke the upstream connection.
 
+## Importing statements (banks Plaid can't connect)
+
+Some banks block Plaid (for example RBC's newer sign-in verification). For those, open **Settings → Connections → Import statements** and upload the bank's monthly PDF statements, or a ZIP of them (ZIPs inside ZIPs and macOS metadata are handled).
+
+- Supported today: **RBC credit card statements** (Visa/Mastercard PDFs from RBC Online Banking).
+- Each statement is parsed on the server and only saved if its transactions add up exactly to the statement's opening and closing balances.
+- Transactions are keyed by RBC's reference numbers, so uploading the same or overlapping statements never creates duplicates. A reissued card (new last four digits) stays one account.
+- Only parsed transactions, statement totals and the latest balance/limit are stored (table `imported_accounts`); the PDFs are not kept.
+- Imported accounts appear everywhere like connected ones (balances, spending, recurring, projections, transactions, chat). Categories come from how Plaid labels the same merchant at your other banks, then a keyword list; anything else shows as "Needs review" and can be fixed with category rules.
+- Card payments on the statement are treated as transfers, so paying the card from another bank isn't counted twice.
+- Imports are saved under the Plaid environment you're viewing (Production or Sandbox). Use **Remove** on the imported account to delete it.
+
 ## Financial calculations
 
 - Posted CAD transactions only; pending and foreign-currency transactions are excluded from metrics. No FX conversion.
 - Positive Plaid amounts are outflows. Only INCOME categories count as income; other negative amounts are refunds unless categorized as transfers.
 - Recognized transfers and credit-card payments are excluded to avoid double counting. Non-card loan payments currently count as outflows including principal.
 - Savings rate is income less net spending, divided by income; it is not a comprehensive wealth measure.
-- Categories can be wrong. Review low-confidence records and reconcile with statements. This version has no manual category editor or CSV importer.
+- Categories can be wrong. Review low-confidence records and reconcile with statements. Recategorize from Transactions (optionally as a rule). PDF statement import is available for RBC credit cards.
 - Projections start with CAD depository balances and use average income/spending over the prior three complete calendar months. Each step represents a 30-day month. They require some data in each month but cannot prove completeness. They exclude transfer effects, debt settlement, interest and investment returns; they are scenarios, not bill-due-date forecasts. Account filters affect projections.
 - Insights are rule-based observations, not personalized investment or tax advice.
 
