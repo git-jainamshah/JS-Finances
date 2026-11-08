@@ -42,10 +42,12 @@ const PLAN_ORDER=['Rent','Loan payments','Bills & subscriptions','Groceries','Di
 const FIXED_GROUPS=new Set(['Rent','Loan payments','Bills & subscriptions']);
 const NO_BUDGET=new Set(['Needs review','Bank fees','Rent','Loan payments','Income','Transfers','Credit card payments','Refunds','Household contribution','Reimbursed pass-through']);
 
-export function createEngine(data,{rules={},overrides={},budgets={},tracked=[],today}={}){
+export function createEngine(data,{rules={},overrides={},budgets={},tracked=[],today,loanPayments=null}={}){
  const TODAY=today?new Date(today):new Date();TODAY.setHours(12,0,0,0);
  const accounts=(data?.accounts||[]).map(a=>({...a,class:a.class||'cash'}));
- const tx=(data?.transactions||[]).map(t=>{const c=overrides[t.id]||rules[t.name];return c&&c!==t.category?{...t,category:c}:{...t};}).sort((a,b)=>b.date.localeCompare(a.date)||String(a.id).localeCompare(String(b.id)));
+ // Confirmed payments on loans you added count as money out ("Loan payments") even when the bank
+ // labels them card payments or transfers, which are otherwise left out of spending.
+ const tx=(data?.transactions||[]).map(t=>{if(loanPayments?.has(t.id)&&['credit_payment','transfer'].includes(t.kind))t={...t,kind:'expense',category:'Loan payments',loanPayment:true};const c=overrides[t.id]||rules[t.name];return c&&c!==t.category?{...t,category:c}:{...t};}).sort((a,b)=>b.date.localeCompare(a.date)||String(a.id).localeCompare(String(b.id)));
  const todayIso=iso(TODAY),daysAgo=n=>{const d=new Date(TODAY);d.setDate(d.getDate()-n);return iso(d);};
  const firstDate=tx.at(-1)?.date||todayIso,minMonth=firstDate.slice(0,7);
 
@@ -194,6 +196,8 @@ BUDGET OVERRIDES: ${JSON.stringify(budgets)}
 USER CATEGORY RULES: ${ruleText||'none'}
 LOANS & IOUS (added by the user; balances already reduce for payments tracked since they were entered; "repay someday" items are not debt): ${plans?plans.loans:loans.map(l=>`${l.dir==='owe'?'User owes':'Owed to user by'} ${l.who}: "${l.name}" balance ${l.balance} of ${l.original}, monthly ${l.payment}, rate ${l.rate}%`).join('; ')||'none'}
 SAVINGS GOALS: ${plans?plans.goals:'none'}
+DEBT & STABILITY (cards, lines of credit, loans; rates marked 'assumed' are estimates the user can correct on the Loans page): ${plans?.debt||'n/a'}
+When asked how to get out of debt or become more stable: first close any monthly shortfall (name specific categories/merchants and amounts), then avalanche (highest rate first), stop drawing on lines of credit, keep credit use under 30%, build a small buffer. Be concrete and kind.
 NEW SUBSCRIPTIONS THE USER CHOSE TO TRACK: ${tracked.join(', ')||'none'}
 Use the search_transactions tool whenever a question involves specific merchants, dates, largest purchases, or listing transactions; cite the most relevant ids.
 Reply with ONLY one JSON object, no code fences:

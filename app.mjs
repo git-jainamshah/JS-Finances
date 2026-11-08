@@ -6,7 +6,7 @@ import {getRuntime,root} from './lib/runtime.mjs';
 import {ConfigurationError} from './lib/config.mjs';
 import {accountClass,classifyTransactions,demoData,applyChanges} from './finance.mjs';
 import {createEngine,chatSystemPrompt,searchTool} from './insights.mjs';
-import {describeForChat} from './loans.mjs';
+import {describeForChat,loanPaymentIds,debtPlan,describeDebtForChat} from './loans.mjs';
 import {parseStatement,mergeImport,importToPlaid,learnCategories,StatementError} from './statements.mjs';
 const plaidEnvironments=['sandbox','production'];
 const defaultEnv=process.env.PLAID_ENV || 'sandbox';
@@ -96,8 +96,10 @@ async function askAssistant({mode,environment,messages}){
   const {default:Anthropic}=await import('@anthropic-ai/sdk');
   anthropicClient||=new Anthropic({apiKey:process.env.ANTHROPIC_API_KEY,timeout:50000,maxRetries:1});
   const state=await readState([`data:${mode}`]),ws=state[`data:${mode}`]||{};
-  const J=createEngine(await dataFor(mode,environment),{rules:ws.rules||{},overrides:ws.overrides||{},budgets:ws.budgets||{},tracked:ws.tracked||[]});
-  const plans=describeForChat(Array.isArray(ws.loans)?ws.loans:[],Array.isArray(ws.goals)?ws.goals:[],J.tx);
+  const raw=await dataFor(mode,environment),wsLoans=Array.isArray(ws.loans)?ws.loans:[];
+  const J=createEngine(raw,{rules:ws.rules||{},overrides:ws.overrides||{},budgets:ws.budgets||{},tracked:ws.tracked||[],loanPayments:loanPaymentIds(wsLoans,raw?.transactions||[])});
+  const wsGoals=Array.isArray(ws.goals)?ws.goals:[],plans=describeForChat(wsLoans,wsGoals,J.tx);
+  plans.debt=describeDebtForChat(debtPlan({plan:J.plan({}),accounts:J.accounts,transactions:J.tx,loans:wsLoans,goals:wsGoals,cash:J.cash(),rates:ws.debt?.rates||{},today:J.todayIso}));
   const system=chatSystemPrompt(J,{budgets:ws.budgets||{},rules:ws.rules||{},plans,tracked:ws.tracked||[]});
   const convo=messages.map(m=>({role:m.role,content:m.content}));
   for(let step=0;step<5;step++){

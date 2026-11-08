@@ -2,11 +2,12 @@ import {html,render,Component} from '/vendor/preact-htm.mjs';
 import {createEngine,money,iso,mk,mLong} from '/insights.mjs';
 import {NavIcon,BrandMark,Wordmark,Select,DEFAULT_LAYOUT} from '/ui.js';
 import {Pages} from '/pages.js';
+import {loanPaymentIds} from '/loans.mjs';
 
 const SAMPLE_LOANS=[{id:'honda',dir:'owe',name:'Honda Civic auto loan',who:'Honda Financial Services',original:24000,balance:14620,payment:486,rate:4.99,day:15,connected:true,institution:'RBC'},{id:'osap',dir:'owe',name:'OSAP student loan',who:'National Student Loans Service Centre',original:18500,balance:6840,payment:260,rate:6.2,day:28,connected:false},{id:'fam',dir:'owe',kind:'someday',name:'Help with first & last rent',who:'Mom & Dad',original:5000,balance:3200,payment:0,rate:0,day:1,targetDate:'2028-06-01',gentle:true,connected:false},{id:'arjun',dir:'owed',name:'Concert tickets + Montreal trip',who:'Arjun',original:1500,balance:900,payment:150,rate:0,day:30,connected:false}];
 export const PAGES=[['overview','Overview','Home'],['spending','Spending','Spending'],['recurring','Recurring','Bills'],['loans','Loans & IOUs','Loans'],['projections','Projections','Plan'],['transactions','Transactions','Activity'],['chat','Chat','Chat'],['settings','Settings','Settings']];
 const SAMPLE_GOALS=[{id:'kids',name:'Future kids fund',target:20000,saved:4200,targetDate:'2029-09-01',contributions:[]},{id:'trip',name:'Japan trip',target:6000,saved:1850,targetDate:'2027-10-01',contributions:[]}];
-const PREF_KEYS=['layout','layoutV','saved','views','density','reduceMotion'],DATA_KEYS=['budgets','rules','overrides','loans','goals','dismissed','tracked'],LAYOUT_V=2;
+const PREF_KEYS=['layout','layoutV','saved','views','density','reduceMotion'],DATA_KEYS=['budgets','rules','overrides','loans','goals','debt','dismissed','tracked'],LAYOUT_V=2;
 // Cards added after a layout was saved are inserted once, next to a related card; removing them later sticks.
 const upgradeLayout=(l,v)=>{l=[...l];if((v||1)<2&&!l.includes('goals')){const i=l.indexOf('loans');l.splice(i<0?l.length:i+1,0,'goals');}return l;};
 const todayStr=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
@@ -15,7 +16,7 @@ const withAsOf=loans=>Array.isArray(loans)?loans.map(l=>l.balanceAsOf||l.connect
 const LOCAL='jsf-ui-v2',ENV_KEY='finance-plaid-environment';
 const readLocal=()=>{try{return JSON.parse(localStorage.getItem(LOCAL)||'{}');}catch{return {};}};
 const newChatId=()=>'c'+Date.now().toString(36)+Math.random().toString(36).slice(2,8);
-const blankData=mode=>({budgets:{},rules:{},overrides:{},loans:mode==='demo'?SAMPLE_LOANS:[],goals:mode==='demo'?SAMPLE_GOALS:[],dismissed:[],tracked:[]});
+const blankData=mode=>({budgets:{},rules:{},overrides:{},loans:mode==='demo'?SAMPLE_LOANS:[],goals:mode==='demo'?SAMPLE_GOALS:[],debt:{rates:{}},dismissed:[],tracked:[]});
 
 class App extends Component{
  constructor(){
@@ -23,7 +24,7 @@ class App extends Component{
   this.state={booting:true,bootError:'',status:null,data:null,plaid:null,mode:'demo',env:['sandbox','production'].includes(env)?env:'sandbox',busy:'',
    page:L.page||'overview',range:L.range||'12m',custom:L.custom||null,inst:'',edit:false,moreOpen:false,cpMonth:'',
    layout:DEFAULT_LAYOUT,layoutV:LAYOUT_V,saved:[],views:[],density:'comfortable',reduceMotion:false,...blankData('demo'),msgs:[],chatId:null,chatList:[],historyOpen:false,
-   loanFilter:'all',loanForm:null,loanErr:'',matchPage:{},extra:{},payFor:'',payAmt:'',input:'',loading:false,quick:'',nwHover:null,budgetMonth:'last',
+   loanFilter:'all',loanForm:null,loanErr:'',matchPage:{},pickFor:'',pickQ:'',pickAll:false,debtExtra:100,extra:{},payFor:'',payAmt:'',input:'',loading:false,quick:'',nwHover:null,budgetMonth:'last',
    cat:'',merchant:'',calMonth:'',calDay:'',incChg:0,oneOff:0,oneOffMonth:6,cuts:{},cancel:[],goal:10000,cfHover:null,showCustom:false,cStart:'',cEnd:'',
    q:'',tCat:'',tType:'all',sort:{key:'date',dir:'desc'},limit:40,editTx:'',editCat:'',editRule:true,view:'all',
    setTab:'connections',w:window.innerWidth,toast:'',draft:null,leaveTo:null,savedAt:'',plaidEditing:false,plaidMsg:null,pwMsg:'',pwBusy:false};
@@ -133,7 +134,7 @@ class App extends Component{
  short(n){const a=Math.abs(n);return (n<0?'−':'')+(a>=1000?'$'+(a/1000).toFixed(a>=10000?0:1)+'k':'$'+Math.round(a));}
  fmtDate(d){return new Date(`${d}T12:00:00`).toLocaleDateString('en-CA',{month:'short',day:'numeric'});}
  move(id,dir){const l=[...this.state.layout],i=l.indexOf(id),j=i+dir;if(j<0||j>=l.length)return;[l[i],l[j]]=[l[j],l[i]];this.setState({layout:l});}
- engine(){const S=this.state;if(!S.data)return null;const c=this._eng;if(c&&c.d===S.data&&c.r===S.rules&&c.o===S.overrides&&c.b===S.budgets&&c.t===S.tracked)return c.v;const v=createEngine(S.data,{rules:S.rules,overrides:S.overrides,budgets:S.budgets,tracked:S.tracked});this._eng={d:S.data,r:S.rules,o:S.overrides,b:S.budgets,t:S.tracked,v};return v;}
+ engine(){const S=this.state;if(!S.data)return null;const c=this._eng;if(c&&c.d===S.data&&c.r===S.rules&&c.o===S.overrides&&c.b===S.budgets&&c.t===S.tracked&&c.l===S.loans)return c.v;const v=createEngine(S.data,{rules:S.rules,overrides:S.overrides,budgets:S.budgets,tracked:S.tracked,loanPayments:loanPaymentIds(S.loans,S.data.transactions||[])});this._eng={d:S.data,r:S.rules,o:S.overrides,b:S.budgets,t:S.tracked,l:S.loans,v};return v;}
  connectedLoans(J){
   // Loan accounts your bank reports, paired with a detected loan-payment stream when possible.
   if(this.state.mode==='demo')return [];

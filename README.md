@@ -113,6 +113,10 @@ The Loans & IOUs page tracks four kinds of items, stored in your workspace data 
 - **Repay someday** covers money with no payment schedule, for example family help. It is not counted as debt. With a "repay by" month, it shows how much to set aside each month.
 - **Savings goals** have a target, an amount already saved and an optional date. You can add savings as you go.
 
+- **Example payment.** If matching misses a loan, click **Show an example payment** and pick one transaction you know is a payment. Its description, amount and day become extra signals for the search across all accounts and cards. It is only an example, so you still confirm the matches it finds. Lender payments that banks label "card payment" or "transfer" now qualify when the name matches. Once confirmed, they count as **Loan payments** in your spending, so cash flow isn't understated.
+- **Lines of credit** (bank accounts recognised as lines of credit, e.g. ScotiaLine) appear automatically. For each one the page shows the average paid in, drawn and interest per month over the last 6 months, whether the balance is going down, and the monthly payment needed to clear it in 12, 24 or 36 months. The rate is estimated from interest charges, and you can edit it.
+- **Debt & stability plan** (the "Debt plan" filter, also at the bottom of "All"). It combines income, spending, cards, lines of credit, loans, goals and cash into ranked steps: close any monthly shortfall (with specific category cuts), pay the highest-rate debt first, stop drawing on lines of credit, keep credit use under 30%, and build a buffer. It also shows a debt-free date for minimums, +$100, +$250 and +$500 a month. Card rates default to 20.99% until you enter the real ones. Chat receives the same summary.
+
 Repay-someday items and goals also appear in the **Plans & goals** card on Overview and in the **Your plans** section on Projections, which compares the monthly amount needed with what you usually keep. Chat sees them too.
 
 ## Financial calculations
