@@ -40,7 +40,7 @@ export function loanMath(l,extra=0){
 const PLAN_GROUPS={'Food & dining':'Dining out','Rent':'Rent','Loan payments':'Loan payments','Groceries':'Groceries','Shopping':'Shopping','Transport':'Transport','Travel':'Travel','Personal care':'Personal care','Health':'Health'};
 const PLAN_ORDER=['Rent','Loan payments','Bills & subscriptions','Groceries','Dining out','Shopping','Transport','Travel','Personal care','Health','Other'];
 const FIXED_GROUPS=new Set(['Rent','Loan payments','Bills & subscriptions']);
-const NO_BUDGET=new Set(['Bank fees','Rent','Loan payments','Income','Transfers','Credit card payments','Refunds','Household contribution','Reimbursed pass-through']);
+const NO_BUDGET=new Set(['Needs review','Bank fees','Rent','Loan payments','Income','Transfers','Credit card payments','Refunds','Household contribution','Reimbursed pass-through']);
 
 export function createEngine(data,{rules={},overrides={},budgets={},tracked=[],today}={}){
  const TODAY=today?new Date(today):new Date();TODAY.setHours(12,0,0,0);
@@ -64,7 +64,7 @@ export function createEngine(data,{rules={},overrides={},budgets={},tracked=[],t
  const streams=[];
  for(const [key,list] of groups){
   const rows=[...list].sort((a,b)=>a.date.localeCompare(b.date)),ms=[...new Set(rows.map(r=>r.date.slice(0,7)))];
-  if(ms.length<3||rows.length>ms.length+1)continue;
+  if(ms.length<3||rows.length>ms.length+1||rows.at(-1).category==='Bank fees'||/\bINTEREST\b/i.test(rows.at(-1).name))continue;
   const gaps=ms.slice(1).map((m,i)=>monthNo(m)-monthNo(ms[i]));if(median(gaps)>1.5)continue;
   const last=rows.at(-1),recentAmts=rows.slice(-6).map(r=>r.amount),med=median(recentAmts),spread=Math.max(...recentAmts)-Math.min(...recentAmts);
   const rent=rows.some(isRentPayment)||last.category==='Rent',loan=!rent&&(last.category==='Loan payments'||/\b(?:HONDA FINANCE|AFFIRM|MORTGAGE|LOAN PAYMENT)\b/i.test(last.name));
@@ -90,7 +90,7 @@ export function createEngine(data,{rules={},overrides={},budgets={},tracked=[],t
    const cand=streams.find(s=>s.key===key&&s.candidate);
    if(cand){if(cand.active)out.push({name:cand.name,category:cand.category,amount:cand.amount,account:cand.account,first:cand.since,count:cand.count,next:cand.next,yearly:Math.round(cand.amount*12*100)/100,day:cand.day,type:'likely',confidence:cand.count>=3?'High':'Medium'});continue;}
    const rows=[...list].sort((a,b)=>a.date.localeCompare(b.date)),first=rows[0].date,last=rows.at(-1);
-   if(first<cutoff||['Rent','Loan payments','Groceries','Food & dining'].includes(last.category))continue;
+   if(first<cutoff||['Rent','Loan payments','Groceries','Food & dining','Bank fees'].includes(last.category)||/\bINTEREST\b/i.test(last.name))continue;
    const amts=rows.map(r=>r.amount),avg=sum(rows)/rows.length,stable=amts.every(a=>Math.abs(a-avg)<=Math.max(1,avg*.05)),mn=new Set(rows.map(r=>r.date.slice(0,7))).size;
    const nd=addMonths(new Date(`${last.date}T12:00:00`),1);
    const base={name:last.name,category:last.category,amount:last.amount,account:last.accountName||last.institution,first,count:rows.length,next:iso(nd),yearly:Math.round(last.amount*12*100)/100,day:Number(last.date.slice(8))};
